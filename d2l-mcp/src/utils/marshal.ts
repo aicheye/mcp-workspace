@@ -155,7 +155,8 @@ export interface MarshalledDueDate {
 }
 
 export function marshalCalendarEvents(response: { Objects: RawCalendarEvent[] }): MarshalledDueDate[] {
-  return response.Objects.map((e) => {
+  // First, process all events
+  const processedEvents = response.Objects.map((e) => {
     const entityType = e.AssociatedEntity?.AssociatedEntityType;
     let type: string | null = null;
     if (entityType?.includes('Dropbox')) type = 'assignment';
@@ -163,16 +164,75 @@ export function marshalCalendarEvents(response: { Objects: RawCalendarEvent[] })
     else if (entityType?.includes('Discussion')) type = 'discussion';
     else if (entityType) type = entityType.split('.').pop() || null;
 
-    return removeEmpty({
+    // Use EndDateTime as the primary date (due date)
+    const dueDateTime = e.EndDateTime;
+    
+    // Check if title/description contains "due" keywords
+    const titleLower = e.Title.toLowerCase();
+    const isDueDate = titleLower.includes('due') || titleLower.includes('deadline');
+
+    return {
       title: e.Title,
-      dueDate: formatDate(e.StartDateTime),
-      dueDateRelative: formatRelativeDate(e.StartDateTime),
+      dueDate: formatDate(dueDateTime),
+      dueDateRelative: formatRelativeDate(dueDateTime),
+      dueDateRaw: dueDateTime, // Keep raw date for deduplication
+      isDueDate, // Flag to prioritize this event
       course: e.OrgUnitName,
       type,
       assignmentId: e.AssociatedEntity?.AssociatedEntityId || null,
       viewUrl: e.CalendarEventViewUrl,
       submitUrl: e.AssociatedEntity?.Link || null,
-    });
+    };
+  });
+
+  // Group by assignmentId to find duplicates
+  const groupedByAssignment = new Map<number, typeof processedEvents>();
+  
+  for (const event of processedEvents) {
+    if (event.assignmentId) {
+      const group = groupedByAssignment.get(event.assignmentId) || [];
+      group.push(event);
+      groupedByAssignment.set(event.assignmentId, group);
+    }
+  }
+
+  // Deduplicate: for each assignment with multiple dates, prefer the one marked as "due"
+  const deduplicatedEvents: typeof processedEvents = [];
+  
+  for (const event of processedEvents) {
+    if (event.assignmentId) {
+      const group = groupedByAssignment.get(event.assignmentId)!;
+      
+      if (group.length === 1) {
+        // Only one event, keep it
+        if (!deduplicatedEvents.find(e => e.assignmentId === event.assignmentId)) {
+          deduplicatedEvents.push(event);
+        }
+      } else {
+        // Multiple events: prefer the one with "due" in the title
+        const dueEvent = group.find(e => e.isDueDate);
+        
+        if (dueEvent && !deduplicatedEvents.find(e => e.assignmentId === event.assignmentId)) {
+          deduplicatedEvents.push(dueEvent);
+        } else if (!deduplicatedEvents.find(e => e.assignmentId === event.assignmentId)) {
+          // Fallback: if no "due" keyword, pick middle date
+          const sorted = [...group].sort((a, b) => 
+            new Date(a.dueDateRaw).getTime() - new Date(b.dueDateRaw).getTime()
+          );
+          const middleIndex = sorted.length === 2 ? 1 : Math.floor(sorted.length / 2);
+          deduplicatedEvents.push(sorted[middleIndex]);
+        }
+      }
+    } else {
+      // Events without assignmentId, keep all
+      deduplicatedEvents.push(event);
+    }
+  }
+
+  // Remove the raw date field and isDueDate flag, clean empty values
+  return deduplicatedEvents.map((event) => {
+    const { dueDateRaw, isDueDate, ...rest } = event;
+    return removeEmpty(rest);
   }) as MarshalledDueDate[];
 }
 
