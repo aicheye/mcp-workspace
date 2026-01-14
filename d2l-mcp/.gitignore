@@ -1,6 +1,0 @@
-/node_modules
-/dist
-.env
-.mcp-sessions.json
-d2l-session.tar.gz
-login-page.html

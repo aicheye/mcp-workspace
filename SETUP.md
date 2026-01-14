@@ -6,10 +6,10 @@
 cd /Users/hamzaammar/Documents/Code/mcp-workspace
 
 # 1. Copy environment template to D2L MCP
-cp .env.template d2l-mcp/.env
+cp .env.template .env
 
 # 2. Edit D2L credentials
-nano d2l-mcp/.env
+nano .env
 
 # 3. Authenticate D2L (complete 2FA locally)
 npm run auth-d2l
