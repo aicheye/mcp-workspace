@@ -2,6 +2,7 @@ import { tokenHandler } from "@modelcontextprotocol/sdk/server/auth/handlers/tok
 import {z} from "zod";
 import { supabase } from "../../utils/supabase.js";
 import { NotesTools } from "./notes.js";
+import { uuidv4 } from "zod/v4/mini";
 
 export const PlanningTools = {
     tasks_list: {
@@ -60,6 +61,47 @@ export const PlanningTools = {
                     return `Error fetching tasks: ${error.message}\nStack: ${error.stack}`;
                 }
                 return `Error fetching tasks: ${JSON.stringify(error, null, 2)}`;
+            }
+        }
+    },
+    tasks_add: {
+        description: `Add a new task manually. Use to answer: "Add a task for X", "Create a task called Y due on Z"`,
+        schema: {
+            taskTitle: z.string().describe("The title of the task"),
+            courseId: z.string().describe("The course ID this task belongs to (e.g., MATH119, ECE140)"),
+            dueAt: z.string().describe("Due date in ISO 8601 format (e.g., 2026-01-20T23:59:59Z)"),
+            source: z.string().optional().describe("Source of the task (e.g., 'manual', 'piazza', 'd2l')"),
+            description: z.string().optional().describe("Optional description or details about the task"),
+        },
+        handler: async (args: { taskTitle: string; courseId: string; dueAt: string; source?: string; description?: string }): Promise<string> => {
+            const { taskTitle, courseId, dueAt, source = 'manual', description } = args;
+
+            try {
+                const { data, error } = await supabase
+                    .from('tasks')
+                    .insert({
+                        title: taskTitle,
+                        course_id: courseId,
+                        due_at: dueAt,
+                        source: "manual",
+                        source_ref: `${source}:${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,   
+                        status: 'pending',
+                        description: description,
+                    })
+                    .select();
+                
+                if (error) {
+                    console.error('[TASKS_ADD] Supabase error:', JSON.stringify(error, null, 2));
+                    return `Error adding task: ${error.message || JSON.stringify(error, null, 2)}`;
+                }
+                
+                return JSON.stringify({ success: true, task: data[0] }, null, 2);
+            } catch (error) {
+                console.error('[TASKS_ADD] Exception:', error);
+                if (error instanceof Error) {
+                    return `Error adding task: ${error.message}\nStack: ${error.stack}`;
+                }
+                return `Error adding task: ${JSON.stringify(error, null, 2)}`;
             }
         }
     },

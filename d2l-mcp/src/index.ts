@@ -297,6 +297,13 @@ function createServer(): McpServer {
     wrapToolHandler("plan_week", PlanningTools.plan_week.handler)
   )
 
+  server.tool(
+    "tasks_add",
+    PlanningTools.tasks_add.description,
+    PlanningTools.tasks_add.schema,
+    wrapToolHandler("task_add", PlanningTools.tasks_add.handler)
+  );
+
   return server;
 }
 
