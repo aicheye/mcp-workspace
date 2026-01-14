@@ -1,171 +1,191 @@
-# D2L Brightspace MCP Server
+# StudyMCP - D2L Brightspace & Piazza MCP Server
 
-An MCP (Model Context Protocol) server that provides AI assistants with tools to interact with D2L Brightspace LMS.
+An MCP (Model Context Protocol) server that gives AI assistants access to your university's D2L Brightspace LMS and Piazza discussion forums.
 
-**I do not condone the use of this server in any activities that would violate the user's university's Academic Code of Conduct.**
+> ⚠️ **Academic Integrity Notice**: This tool is for personal productivity only. Do not use it for any activities that violate your university's Academic Code of Conduct.
 
 ## Features
 
-- **Automated authentication** - Use `D2L_USERNAME` and `D2L_PASSWORD` env vars for automated login, or browser-based SSO
-- **Persistent session storage** - login once, use for hours
-- **12 tools** for accessing assignments, grades, calendar, announcements, course content
-- **File downloads** with automatic text extraction (docx, txt, etc.)
-- **LLM-optimized responses** - clean, token-efficient output
-- **Multiple transport modes** - HTTP/SSE (default) or stdio for remote access
+### D2L Brightspace Tools
+- **Assignments** - List assignments, view details, check submissions & feedback
+- **Grades** - View all grades with scores and instructor feedback  
+- **Calendar** - Get upcoming due dates and events
+- **Course Content** - Browse syllabus, modules, topics, and lectures
+- **Announcements** - Read instructor announcements
+- **File Downloads** - Download and extract content from course files (docx, pdf, etc.)
 
-## Installation
+### Piazza Tools
+- **Sync Posts** - Fetch recent posts from your Piazza classes to local database
+- **Semantic Search** - AI-powered search across all your Piazza posts
+- **Get Classes** - List all enrolled Piazza classes
 
-### 1. Clone the repository
+### Study Tools
+- **Task Management** - Track assignments and deadlines across courses
+- **Notes Sync** - Sync and search your course notes
+- **Weekly Planning** - Generate study plans based on upcoming deadlines
+
+## Quick Start
+
+### 1. Clone and Install
 
 ```bash
 git clone https://github.com/joshuasoup/d2l-mcp.git
 cd d2l-mcp
-```
-
-### 2. Install dependencies and build
-
-```bash
 npm install
 npm run build
 ```
 
-This will automatically install Chromium for browser automation and build the project.
-
-## Setup
-
-### 1. Configure environment variables
-
-Copy the example environment file and add your credentials:
+### 2. Configure Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Then edit `.env` and add your D2L credentials:
+Edit `.env` with your credentials:
 
-```
-D2L_HOST=learn.ul.ie
+```env
+# Required for D2L
+D2L_HOST=learn.yourschool.edu
 D2L_USERNAME=your-username
 D2L_PASSWORD=your-password
-D2L_COURSE_ID=your-course-id
+
+# Required for Piazza & Study tools
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-key
+OPENAI_API_KEY=sk-your-key
+
+# Optional: Piazza integration
+PIAZZA_USERNAME=your-email@school.edu
+PIAZZA_PASSWORD=your-piazza-password
 ```
 
-### 2. First-time authentication
+### 3. Set Up Database (for Study Tools)
 
-You can authenticate in two ways:
+Create a Supabase project and run the schema in `src/study/db/schema.sql`.
 
-**Option A: Using environment variables (automated)**
-
-If you've added `D2L_USERNAME` and `D2L_PASSWORD` to your `.env` file, the server will automatically log in using those credentials.
-
-**Option B: Using browser (interactive)**
+### 4. Run the Server
 
 ```bash
-npm run auth
-# or
-d2l-mcp-auth
-```
-
-This opens a browser window where you log in to Brightspace. Your session is saved to `~/.d2l-session/`.
-
-If both `D2L_USERNAME` and `D2L_PASSWORD` are set in your `.env` file, the server will automatically log in using those credentials. Otherwise, it will use the saved browser session or prompt for interactive login.
-
-### 3. Configure poke mcp
-
-Go to https://poke.com/settings/connections/integrations/new and enter your server URL (if you're doing it locally, port forward localhost:3000)
-
-### 4. Running the Server
-
-By default, the server runs in HTTP mode on port 3000:
-
-```bash
-d2l-mcp
-# or
 npm start
 ```
 
-The server will start on `http://localhost:3000/mcp`. Clients can connect via:
+Server runs on `http://localhost:3000/mcp`
 
-- **POST** `/mcp` - Send JSON-RPC messages
-- **GET** `/mcp` - Establish SSE stream for server-to-client messages
-- **DELETE** `/mcp` - Terminate session
+## Connecting to MCP Clients
 
-HTTP mode supports multiple concurrent clients, each with their own session ID.
+### VS Code (Copilot)
 
-To use stdio transport (for Claude Desktop), set the environment variable:
+Add to your VS Code settings:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "studymcp": {
+        "url": "http://localhost:3000/mcp"
+      }
+    }
+  }
+}
+```
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "studymcp": {
+      "command": "node",
+      "args": ["/path/to/d2l-mcp/dist/index.js"],
+      "env": {
+        "MCP_TRANSPORT": "stdio"
+      }
+    }
+  }
+}
+```
+
+### Remote Access (ngrok)
 
 ```bash
-MCP_TRANSPORT=stdio d2l-mcp
+# Terminal 1: Start server
+npm start
+
+# Terminal 2: Expose via ngrok
+ngrok http 3000
 ```
+
+Use the ngrok URL (e.g., `https://abc123.ngrok.io/mcp`) in any MCP client.
 
 ## Available Tools
 
-### Assignments
+### D2L Tools
 
-| Tool                         | Description                                          |
-| ---------------------------- | ---------------------------------------------------- |
-| `get_assignments`            | List all assignments with due dates and instructions |
-| `get_assignment`             | Get full details for a specific assignment           |
-| `get_assignment_submissions` | Get your submissions, grades, and feedback           |
+| Tool | Description |
+|------|-------------|
+| `get_assignments` | List all assignments with due dates |
+| `get_assignment` | Get full details for a specific assignment |
+| `get_assignment_submissions` | Get your submissions and feedback |
+| `get_my_grades` | Get all grades with scores |
+| `get_upcoming_due_dates` | Get calendar events and deadlines |
+| `get_course_content` | Get complete course syllabus |
+| `get_course_modules` | Get main course sections |
+| `get_course_module` | Get contents of a specific module |
+| `get_course_topic` | Get details for a specific topic |
+| `get_announcements` | Get course announcements |
+| `get_my_courses` | List enrolled courses |
+| `download_file` | Download course files |
 
-### Course Content
+### Piazza Tools
 
-| Tool                 | Description                              |
-| -------------------- | ---------------------------------------- |
-| `get_course_content` | Get complete course syllabus/structure   |
-| `get_course_topic`   | Get details for a specific topic/lecture |
-| `get_course_modules` | Get main sections/modules of a course    |
-| `get_course_module`  | Get contents within a specific module    |
+| Tool | Description |
+|------|-------------|
+| `piazza_get_classes` | List all enrolled Piazza classes |
+| `piazza_get_posts` | Get posts from a class |
+| `piazza_get_post` | Get a specific post with answers |
+| `piazza_search` | Text search in a class |
+| `piazza_sync` | Sync posts to database |
+| `piazza_embed_missing` | Generate embeddings for search |
+| `piazza_semantic_search` | AI-powered semantic search |
+| `piazza_suggest_for_item` | Find relevant posts for an assignment |
 
-### Grades & Calendar
+### Study Tools
 
-| Tool                     | Description                                  |
-| ------------------------ | -------------------------------------------- |
-| `get_my_grades`          | Get all your grades with scores and feedback |
-| `get_upcoming_due_dates` | Get calendar events and deadlines            |
-
-### Other
-
-| Tool                | Description                                    |
-| ------------------- | ---------------------------------------------- |
-| `get_announcements` | Get course announcements from instructors      |
-| `get_my_courses`    | List all your enrolled courses                 |
-| `download_file`     | Download and extract content from course files |
-
-## Example Prompts
-
-Once connected to Poke, you can ask things like:
-
-- "What assignments are due this week?"
-- "Show me my grades"
-- "What announcements have been posted?"
-- "Download the weekly report template"
-- "What's the syllabus for this course?"
+| Tool | Description |
+|------|-------------|
+| `sync_all` | Sync all assignments as tasks |
+| `tasks_list` | List tasks by course/status |
+| `tasks_add` | Add a manual task |
+| `tasks_complete` | Mark task as done |
+| `plan_week` | Generate weekly study plan |
+| `notes_sync` | Sync notes from repository |
+| `notes_search` | Search through notes |
+| `notes_suggest_for_item` | Find relevant notes for assignment |
 
 ## Environment Variables
 
-| Variable        | Description                                            | Default                   |
-| --------------- | ------------------------------------------------------ | ------------------------- |
-| `D2L_HOST`      | Your Brightspace hostname                              | `brightspace.carleton.ca` |
-| `D2L_USERNAME`  | Your D2L username for automated login (optional)       | none                      |
-| `D2L_PASSWORD`  | Your D2L password for automated login (optional)       | none                      |
-| `D2L_COURSE_ID` | Default course ID (optional)                           | none                      |
-| `MCP_TRANSPORT` | Transport mode: `stdio`, `http`, or `https`            | `http`                    |
-| `MCP_PORT`      | HTTP server port (only used when `MCP_TRANSPORT=http`) | `3000`                    |
-
-Setting `D2L_COURSE_ID` allows you to omit the course ID from tool calls.
-
-### Transport Modes
-
-- **http** or **https** (default): HTTP/SSE transport for web clients or remote access. Uses StreamableHTTPServerTransport from the MCP SDK.
-- **stdio**: Standard input/output transport, used by Claude Desktop and other MCP clients. Set `MCP_TRANSPORT=stdio` to use this mode.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `D2L_HOST` | Yes | Your Brightspace hostname (e.g., `learn.uwaterloo.ca`) |
+| `D2L_USERNAME` | No | For automated login |
+| `D2L_PASSWORD` | No | For automated login |
+| `D2L_COURSE_ID` | No | Default course ID |
+| `SUPABASE_URL` | For study tools | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | For study tools | Supabase service key |
+| `OPENAI_API_KEY` | For search | OpenAI API key for embeddings |
+| `PIAZZA_USERNAME` | For Piazza | Piazza login email |
+| `PIAZZA_PASSWORD` | For Piazza | Piazza password |
+| `MCP_TRANSPORT` | No | `http` (default) or `stdio` |
+| `MCP_PORT` | No | Server port (default: 3000) |
 
 ## Session Management
 
-- **Token expiry**: Auth tokens expire after ~1 hour but auto-refresh using the saved browser session
-- **Session expiry**: Browser sessions expire after ~24h of inactivity
-- **Re-authenticate**: Run `d2l-mcp-auth` if your session expires
-- **Auto-authenticate** Add d2l username and password to .env to auto authenticate
+- **D2L tokens** expire after ~1 hour but auto-refresh
+- **Browser sessions** persist in `~/.d2l-session/`
+- **Piazza sessions** persist in `~/.piazza-session/`
+- Run `npm run auth` to manually re-authenticate
 
 ## Development
 
@@ -173,11 +193,36 @@ Setting `D2L_COURSE_ID` allows you to omit the course ID from tool calls.
 # Run tests
 npm test
 
-# Run integration tests (requires auth)
+# Integration tests (requires auth)
 npm run test:integration
 
-# Watch mode
-npm run test:watch
+# Build
+npm run build
+```
+
+## Project Structure
+
+```
+src/
+├── index.ts          # MCP server entry point
+├── auth.ts           # D2L authentication
+├── client.ts         # D2L API client
+├── tools/            # D2L tool implementations
+│   ├── calendar.ts
+│   ├── content.ts
+│   ├── grades.ts
+│   ├── news.ts
+│   └── piazza.ts
+└── study/            # Study tools (tasks, notes, piazza)
+    ├── piazzaAuth.ts
+    ├── db/
+    │   ├── schema.sql
+    │   └── piazza_map.json
+    └── src/
+        ├── notes.ts
+        ├── piazza.ts
+        ├── planning.ts
+        └── sync.ts
 ```
 
 ## License
@@ -186,5 +231,4 @@ MIT
 
 ## Credits
 
-This project is based on the original work by [General-Mudkip](https://github.com/General-Mudkip/d2l-mcp-server).
-This version includes additional features and modifications.
+Based on [d2l-mcp-server](https://github.com/General-Mudkip/d2l-mcp-server) by General-Mudkip.
