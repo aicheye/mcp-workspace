@@ -399,6 +399,13 @@ async function main() {
       req: express.Request,
       res: express.Response
     ) => {
+      // Bearer token auth (only if token is set)
+      const token = process.env.STUDY_MCP_TOKEN;
+      const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+      if (token && (!authHeader || authHeader !== `Bearer ${token}`)) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
       const requestStartTime = Date.now();
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
       const requestMethod = req.body?.method || "unknown";
@@ -579,6 +586,13 @@ async function main() {
       req: express.Request,
       res: express.Response
     ) => {
+      // Bearer token auth (only if token is set)
+      const token = process.env.STUDY_MCP_TOKEN;
+      const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+      if (token && (!authHeader || authHeader !== `Bearer ${token}`)) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
       const requestStartTime = Date.now();
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
@@ -620,6 +634,13 @@ async function main() {
       req: express.Request,
       res: express.Response
     ) => {
+      // Bearer token auth (only if token is set)
+      const token = process.env.STUDY_MCP_TOKEN;
+      const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+      if (token && (!authHeader || authHeader !== `Bearer ${token}`)) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
       const requestStartTime = Date.now();
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
 

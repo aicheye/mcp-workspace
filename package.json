@@ -27,6 +27,8 @@
     "url": "https://github.com/joshuasoup/d2l-mcp"
   },
   "scripts": {
+    "mcp:launch": "npm run auth && npm start",
+    "mcp:bridge": "node scripts/mcp_stdio_bridge.mjs",
     "build": "tsc",
     "start": "npm run auth && node dist/index.js",
     "dev": "tsc && node dist/index.js",
