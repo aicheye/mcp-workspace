@@ -6,7 +6,10 @@ import {
   ScrollView,
   RefreshControl,
   TouchableOpacity,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { dashboardService } from '../services/dashboard';
 import { DashboardResponse, Note } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -15,14 +18,30 @@ export default function DashboardScreen() {
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
 
   const loadDashboard = async () => {
     try {
       const data = await dashboardService.getDashboard();
       setDashboard(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading dashboard:', error);
+      // Show user-friendly error message
+      if (error.response?.status === 502 || error.response?.status === 504) {
+        // Backend not available or timeout
+        console.warn('Backend server not available or timed out. Make sure the backend is running.');
+      } else if (error.response?.status === 503) {
+        // Service unavailable - likely database issue
+        const errorMsg = error.response?.data?.message || error.response?.data?.error || 'Database connection issue';
+        console.warn('Service unavailable (503):', errorMsg);
+        Alert.alert(
+          'Service Unavailable',
+          errorMsg + '\n\nThis usually means the database is not configured or not accessible. Check backend logs.',
+          [{ text: 'OK' }]
+        );
+      } else if (error.code === 'ECONNREFUSED' || error.message?.includes('Network Error')) {
+        console.warn('Cannot connect to backend. Check API_BASE_URL configuration.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -40,135 +59,309 @@ export default function DashboardScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Text>Loading...</Text>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6366f1" />
+        <Text style={styles.loadingText}>Loading dashboard...</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>Dashboard</Text>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.contentContainer}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
+      >
+        {/* Header with gradient effect */}
+        <View style={styles.header}>
+        <View>
+          <Text style={styles.greeting}>Welcome back</Text>
+          <Text style={styles.userName}>{user?.email?.split('@')[0] || 'User'}</Text>
+        </View>
         <TouchableOpacity onPress={logout} style={styles.logoutButton}>
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </View>
 
+      {/* Stats Cards */}
       <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
+        <View style={[styles.statCard, styles.statCardPrimary]}>
+          <View style={styles.statIconContainer}>
+            <Text style={styles.statIcon}>📚</Text>
+          </View>
           <Text style={styles.statValue}>{dashboard?.stats.notesCount || 0}</Text>
           <Text style={styles.statLabel}>Total Notes</Text>
         </View>
-        <View style={styles.statCard}>
+        <View style={[styles.statCard, styles.statCardSecondary]}>
+          <View style={styles.statIconContainer}>
+            <Text style={styles.statIcon}>📄</Text>
+          </View>
           <Text style={styles.statValue}>{dashboard?.usage.totalChunks || 0}</Text>
-          <Text style={styles.statLabel}>Total Chunks</Text>
+          <Text style={styles.statLabel}>Chunks</Text>
         </View>
       </View>
 
+      {/* Recent Notes Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Recent Notes</Text>
         {dashboard?.recentNotes && dashboard.recentNotes.length > 0 ? (
           dashboard.recentNotes.map((note) => (
-            <View key={note.id} style={styles.noteCard}>
-              <Text style={styles.noteTitle}>{note.title}</Text>
-              {note.courseId && (
-                <Text style={styles.noteCourse}>{note.courseId}</Text>
-              )}
-              <Text style={styles.noteDate}>
-                {new Date(note.createdAt).toLocaleDateString()}
-              </Text>
-            </View>
+            <TouchableOpacity key={note.id} style={styles.noteCard} activeOpacity={0.7}>
+              <View style={styles.noteCardHeader}>
+                <View style={styles.noteIcon}>
+                  <Text style={styles.noteIconText}>📝</Text>
+                </View>
+                <View style={styles.noteContent}>
+                  <Text style={styles.noteTitle} numberOfLines={1}>{note.title}</Text>
+                  {note.courseId && (
+                    <View style={styles.courseBadge}>
+                      <Text style={styles.courseText}>{note.courseId}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+              <View style={styles.noteFooter}>
+                <Text style={styles.noteDate}>
+                  {new Date(note.createdAt).toLocaleDateString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric',
+                    year: 'numeric'
+                  })}
+                </Text>
+                {note.status && (
+                  <View style={[styles.statusBadge, note.status === 'ready' && styles.statusReady]}>
+                    <Text style={styles.statusText}>{note.status}</Text>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
           ))
         ) : (
-          <Text style={styles.emptyText}>No notes yet</Text>
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyIcon}>📭</Text>
+            <Text style={styles.emptyText}>No notes yet</Text>
+            <Text style={styles.emptySubtext}>Upload your first note to get started</Text>
+          </View>
         )}
       </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8fafc',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#64748b',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
+    alignItems: 'flex-start',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 16,
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#e2e8f0',
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+  greeting: {
+    fontSize: 14,
+    color: '#64748b',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+  userName: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1e293b',
+    textTransform: 'capitalize',
   },
   logoutButton: {
-    padding: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
   },
   logoutText: {
-    color: '#007AFF',
-    fontSize: 16,
+    color: '#6366f1',
+    fontSize: 14,
+    fontWeight: '600',
   },
   statsContainer: {
     flexDirection: 'row',
-    padding: 20,
+    paddingHorizontal: 24,
+    paddingTop: 24,
     gap: 16,
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
     padding: 20,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  statCardPrimary: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#6366f1',
+  },
+  statCardSecondary: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#8b5cf6',
+  },
+  statIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#f1f5f9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statIcon: {
+    fontSize: 24,
   },
   statValue: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 4,
   },
   statLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '500',
   },
   section: {
-    padding: 20,
+    paddingHorizontal: 24,
+    paddingTop: 32,
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: '700',
+    color: '#1e293b',
     marginBottom: 16,
   },
   noteCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
     padding: 16,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  noteCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  noteIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f1f5f9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  noteIconText: {
+    fontSize: 20,
+  },
+  noteContent: {
+    flex: 1,
   },
   noteTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    marginBottom: 4,
+    color: '#1e293b',
+    marginBottom: 6,
   },
-  noteCourse: {
-    fontSize: 14,
-    color: '#007AFF',
-    marginBottom: 4,
+  courseBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ede9fe',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  courseText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6366f1',
+  },
+  noteFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
   },
   noteDate: {
     fontSize: 12,
-    color: '#666',
+    color: '#94a3b8',
+    fontWeight: '500',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#f1f5f9',
+  },
+  statusReady: {
+    backgroundColor: '#dcfce7',
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b',
+    textTransform: 'capitalize',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 16,
   },
   emptyText: {
-    color: '#666',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#64748b',
     textAlign: 'center',
-    padding: 20,
   },
 });

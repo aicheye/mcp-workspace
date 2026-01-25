@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { d2lService } from '../services/d2l';
 import { piazzaService } from '../services/piazza';
@@ -114,8 +115,9 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView style={styles.scrollView}>
+        <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
         <Text style={styles.userEmail}>{user?.email}</Text>
       </View>
@@ -238,60 +240,77 @@ export default function SettingsScreen() {
           <Text style={[styles.actionButtonText, styles.logoutButtonText]}>Sign Out</Text>
         </TouchableOpacity>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8fafc',
   },
   header: {
-    padding: 20,
-    backgroundColor: '#fff',
+    paddingTop: 8,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#e2e8f0',
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 4,
+    fontWeight: '700',
+    marginBottom: 6,
+    color: '#1e293b',
   },
   userEmail: {
     fontSize: 14,
-    color: '#666',
+    color: '#64748b',
+    fontWeight: '500',
   },
   section: {
-    marginTop: 20,
-    paddingHorizontal: 20,
+    marginTop: 24,
+    paddingHorizontal: 24,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '700',
     marginBottom: 16,
-    color: '#333',
+    color: '#1e293b',
   },
   integrationCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   integrationHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   integrationName: {
     fontSize: 18,
     fontWeight: '600',
+    color: '#1e293b',
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
   },
   statusDot: {
     width: 8,
@@ -299,43 +318,57 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   statusConnected: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#10b981',
   },
   statusDisconnected: {
-    backgroundColor: '#999',
+    backgroundColor: '#94a3b8',
   },
   statusText: {
     fontSize: 12,
-    color: '#666',
+    color: '#64748b',
+    fontWeight: '600',
   },
   integrationDescription: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
+    color: '#64748b',
+    marginBottom: 10,
+    lineHeight: 20,
   },
   lastSync: {
     fontSize: 12,
-    color: '#999',
-    marginBottom: 12,
+    color: '#94a3b8',
+    marginBottom: 16,
+    fontWeight: '500',
   },
   integrationActions: {
-    marginTop: 8,
+    marginTop: 4,
   },
   connectButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: '#6366f1',
+    borderRadius: 12,
+    padding: 14,
     alignItems: 'center',
+    shadowColor: '#6366f1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   connectButtonText: {
     color: '#fff',
     fontWeight: '600',
+    fontSize: 15,
   },
   syncButton: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: '#10b981',
+    borderRadius: 12,
+    padding: 14,
     alignItems: 'center',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   syncButtonDisabled: {
     opacity: 0.6,
@@ -343,26 +376,38 @@ const styles = StyleSheet.create({
   syncButtonText: {
     color: '#fff',
     fontWeight: '600',
+    fontSize: 15,
   },
   actionButton: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   actionButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 6,
+    color: '#1e293b',
   },
   actionButtonSubtext: {
     fontSize: 14,
-    color: '#666',
+    color: '#64748b',
+    lineHeight: 20,
   },
   logoutButton: {
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#fee2e2',
   },
   logoutButtonText: {
-    color: '#FF3B30',
+    color: '#ef4444',
   },
 });

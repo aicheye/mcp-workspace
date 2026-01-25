@@ -24,8 +24,22 @@ if (supabaseUrl.startsWith('postgresql://')) {
   supabase = {
     from: (table: string) => {
       return {
-        select: (cols: string = '*') => {
-          let query = `SELECT ${cols} FROM ${table}`;
+        select: (cols: string | { count?: string; head?: boolean } = '*', opts?: { count?: string; head?: boolean }) => {
+          // Handle Supabase count pattern: .select("id", { count: "exact", head: true })
+          // Options are passed as second parameter when first param is a string
+          const options = (typeof cols === 'string' ? opts : cols) || {};
+          const isCount = !!(options.count);
+          const isHead = !!(options.head);
+          
+          let query: string;
+          if (isCount) {
+            // Count query: SELECT COUNT(*) FROM table
+            query = `SELECT COUNT(*) as count FROM ${table}`;
+          } else {
+            const colStr = typeof cols === 'string' ? cols : '*';
+            query = `SELECT ${colStr} FROM ${table}`;
+          }
+          
           const params: any[] = [];
           let paramIndex = 1;
           
@@ -69,26 +83,48 @@ if (supabaseUrl.startsWith('postgresql://')) {
               query += ` LIMIT $${paramIndex}`;
               params.push(n);
               paramIndex++;
+              // Return promise-like object that can be awaited
               return {
                 then: async (resolve: any) => {
-                  const result = await pool.query(query, params);
-                  resolve({ data: result.rows, error: null });
+                  try {
+                    const result = await pool.query(query, params);
+                    if (isCount) {
+                      // For count queries, return the count value
+                      resolve({ 
+                        data: isHead ? null : result.rows, 
+                        count: parseInt(result.rows[0]?.count || '0', 10),
+                        error: null 
+                      });
+                    } else {
+                      resolve({ data: result.rows, error: null });
+                    }
+                  } catch (e: any) {
+                    resolve({ data: null, error: e });
+                  }
                 }
               };
             },
             order: (col: string, opts: { ascending?: boolean } = {}) => {
               const dir = opts.ascending !== false ? 'ASC' : 'DESC';
               query += ` ORDER BY ${col} ${dir}`;
-              return {
-                then: async (resolve: any) => {
-                  const result = await pool.query(query, params);
-                  resolve({ data: result.rows, error: null });
-                }
-              };
+              // Return builder so limit() can be chained
+              return builder;
             },
             then: async (resolve: any) => {
-              const result = await pool.query(query, params);
-              resolve({ data: result.rows, error: null });
+              try {
+                const result = await pool.query(query, params);
+                if (isCount) {
+                  resolve({ 
+                    data: isHead ? null : result.rows, 
+                    count: parseInt(result.rows[0]?.count || '0', 10),
+                    error: null 
+                  });
+                } else {
+                  resolve({ data: result.rows, error: null });
+                }
+              } catch (e: any) {
+                resolve({ data: null, error: e });
+              }
             }
           };
           return builder;

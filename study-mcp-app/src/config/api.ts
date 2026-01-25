@@ -2,9 +2,16 @@ import axios from 'axios';
 import { authService } from '../services/auth';
 
 // Get API URL from environment or use defaults
+// In production, always use https://api.hamzaammar.ca
+// In dev, use localhost unless EXPO_PUBLIC_API_BASE_URL is set
 const API_BASE_URL = 
   process.env.EXPO_PUBLIC_API_BASE_URL ||
   (__DEV__ ? 'http://localhost:3000' : 'https://api.hamzaammar.ca');
+
+// Always log the API URL for debugging
+console.log('[API] Base URL:', API_BASE_URL);
+console.log('[API] __DEV__:', __DEV__);
+console.log('[API] EXPO_PUBLIC_API_BASE_URL:', process.env.EXPO_PUBLIC_API_BASE_URL || 'not set');
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

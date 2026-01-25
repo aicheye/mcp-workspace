@@ -5,8 +5,13 @@
 
 import { Router, Request, Response } from "express";
 import { supabase } from "../utils/supabase.js";
-import { ingestPdfBuffer, embedNoteSections, generateEmbedding } from "../study/src/notes.js";
+import { ingestPdfBuffer, embedNoteSections, generateEmbedding, NotesTools } from "../study/src/notes.js";
 import { isS3Configured, presignUpload, getObjectBuffer, getBucket } from "./s3.js";
+import { SyncTools } from "../study/src/sync.js";
+import { PiazzaTools } from "../study/src/piazza.js";
+import { client } from "../client.js";
+import { getToken } from "../auth.js";
+import { getPiazzaCookieHeader } from "../study/piazzaAuth.js";
 
 const router = Router();
 
@@ -182,32 +187,403 @@ router.get("/search", async (req: Request, res: Response) => {
 router.get("/dashboard", async (req: Request, res: Response) => {
   const userId = req.userId!;
 
-  const [notesRes, sectionsRes, notesCountRes] = await Promise.all([
-    supabase
-      .from("notes")
-      .select("id, title, course_id, created_at, status")
-      .eq("user_id", userId)
+  try {
+    // Test database connection first
+    if (!supabase) {
+      console.error("[API] dashboard error: Supabase client not initialized");
+      res.status(503).json({ 
+        error: "Database not configured", 
+        message: "SUPABASE_URL or DATABASE_URL environment variable is missing or invalid"
+      });
+      return;
+    }
+
+    const [notesRes, sectionsRes, notesCountRes] = await Promise.all([
+      supabase
+        .from("notes")
+        .select("id, title, course_id, created_at, status")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(5),
+      supabase
+        .from("note_sections")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId),
+      supabase
+        .from("notes")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId),
+    ]);
+
+    // Check for errors - if any critical query fails, return error
+    const errors: string[] = [];
+    if (notesRes.error) {
+      console.error("[API] dashboard notes error:", notesRes.error);
+      errors.push(`Notes query failed: ${notesRes.error.message || JSON.stringify(notesRes.error)}`);
+    }
+    if (sectionsRes.error) {
+      console.error("[API] dashboard sections error:", sectionsRes.error);
+      errors.push(`Sections count failed: ${sectionsRes.error.message || JSON.stringify(sectionsRes.error)}`);
+    }
+    if (notesCountRes.error) {
+      console.error("[API] dashboard notesCount error:", notesCountRes.error);
+      errors.push(`Notes count failed: ${notesCountRes.error.message || JSON.stringify(notesCountRes.error)}`);
+    }
+
+    // If all queries failed, return error
+    if (errors.length === 3) {
+      res.status(503).json({ 
+        error: "Database queries failed", 
+        details: errors,
+        message: "All database queries failed. Check database connection and table existence."
+      });
+      return;
+    }
+
+    // Return partial data if some queries succeeded
+    const recentNotes = notesRes.data ?? [];
+    const totalChunks = sectionsRes.count ?? 0;
+    const notesCount = notesCountRes.count ?? 0;
+
+    res.json({
+      recentNotes,
+      usage: { totalChunks },
+      stats: { notesCount },
+      warnings: errors.length > 0 ? errors : undefined,
+    });
+  } catch (e) {
+    console.error("[API] dashboard error:", e);
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    
+    // Check if it's a database connection error
+    if (errorMessage.includes('connection') || errorMessage.includes('ECONNREFUSED') || errorMessage.includes('timeout')) {
+      res.status(503).json({ 
+        error: "Database connection failed", 
+        details: errorMessage,
+        message: "Cannot connect to database. Check SUPABASE_URL/DATABASE_URL and network connectivity."
+      });
+    } else {
+      res.status(500).json({ 
+        error: "Failed to load dashboard", 
+        details: errorMessage 
+      });
+    }
+  }
+});
+
+/** POST /api/notes/embed-missing — Embed missing note sections */
+router.post("/notes/embed-missing", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const { courseId, limit, minChars } = req.body || {};
+
+  try {
+    const result = await NotesTools.notes_embed_missing.handler({
+      userId,
+      courseId: courseId || undefined,
+      limit: limit || 100,
+      minChars: minChars || 200,
+    });
+
+    const parsed = JSON.parse(result);
+    if (parsed.success) {
+      res.json(parsed);
+    } else {
+      res.status(500).json(parsed);
+    }
+  } catch (e) {
+    console.error("[API] embed-missing error:", e);
+    res.status(500).json({ error: "Failed to embed missing notes", details: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** GET /api/d2l/status — Get D2L connection status */
+router.get("/d2l/status", async (req: Request, res: Response) => {
+  try {
+    // Try to get a token to check if D2L is authenticated
+    const token = await getToken();
+    const connected = !!token;
+
+    // Get last sync time from tasks table
+    const { data: lastTask } = await supabase
+      .from("tasks")
+      .select("created_at")
+      .eq("user_id", req.userId!)
+      .eq("source", "d2l")
       .order("created_at", { ascending: false })
-      .limit(5),
-    supabase
-      .from("note_sections")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId),
-    supabase
-      .from("notes")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId),
-  ]);
+      .limit(1)
+      .single();
 
-  const recentNotes = notesRes.data ?? [];
-  const totalChunks = sectionsRes.count ?? 0;
-  const notesCount = notesCountRes.count ?? 0;
+    // Get courses count
+    let coursesCount = 0;
+    if (connected) {
+      try {
+        const enrollments = await client.getMyEnrollments() as { Items: any[] };
+        coursesCount = enrollments?.Items?.filter(
+          (e: any) => e.OrgUnit?.Type?.Code === "Course Offering" && e.Access?.IsActive && e.Access?.CanAccess
+        ).length || 0;
+      } catch (e) {
+        // Ignore errors getting courses
+      }
+    }
 
-  res.json({
-    recentNotes,
-    usage: { totalChunks },
-    stats: { notesCount },
-  });
+    res.json({
+      connected,
+      lastSync: lastTask?.created_at || null,
+      coursesCount,
+    });
+  } catch (e) {
+    console.error("[API] d2l/status error:", e);
+    res.json({
+      connected: false,
+      lastSync: null,
+      coursesCount: 0,
+    });
+  }
+});
+
+/** POST /api/d2l/sync — Sync all D2L assignments */
+router.post("/d2l/sync", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+
+  try {
+    const result = await SyncTools.sync_all.handler({ userId });
+    const parsed = JSON.parse(result);
+    
+    if (parsed.success) {
+      res.json({
+        status: "completed",
+        message: "D2L sync completed successfully",
+        result: parsed,
+      });
+    } else {
+      res.status(500).json({
+        status: "failed",
+        message: parsed.error || "D2L sync failed",
+        result: parsed,
+      });
+    }
+  } catch (e) {
+    console.error("[API] d2l/sync error:", e);
+    res.status(500).json({
+      status: "failed",
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+});
+
+/** GET /api/d2l/courses — Get enrolled courses */
+router.get("/d2l/courses", async (req: Request, res: Response) => {
+  try {
+    const enrollments = await client.getMyEnrollments() as { Items: any[] };
+    
+    const courses = enrollments.Items
+      .filter((e: any) => 
+        e.OrgUnit?.Type?.Code === "Course Offering" && 
+        e.Access?.IsActive && 
+        e.Access?.CanAccess
+      )
+      .map((e: any) => ({
+        id: String(e.OrgUnit.Id),
+        name: e.OrgUnit.Name,
+        code: e.OrgUnit.Code || "",
+        orgUnitId: e.OrgUnit.Id,
+        startDate: e.Access?.StartDate || null,
+        endDate: e.Access?.EndDate || null,
+      }));
+
+    res.json({ courses });
+  } catch (e) {
+    console.error("[API] d2l/courses error:", e);
+    res.status(500).json({ error: "Failed to fetch courses", details: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** GET /api/d2l/courses/:courseId/assignments — Get assignments for a course */
+router.get("/d2l/courses/:courseId/assignments", async (req: Request, res: Response) => {
+  const { courseId } = req.params;
+  const orgUnitId = parseInt(courseId, 10);
+
+  if (isNaN(orgUnitId)) {
+    res.status(400).json({ error: "Invalid course ID" });
+    return;
+  }
+
+  try {
+    const { assignmentTools } = await import("../tools/dropbox.js");
+    const folders = await client.getDropboxFolders(orgUnitId) as any[];
+    const { marshalAssignments } = await import("../utils/marshal.js");
+    const assignments = marshalAssignments(folders);
+
+    res.json({
+      assignments: assignments.map((a: any) => ({
+        id: a.id,
+        name: a.name,
+        dueDate: a.dueDate,
+        instructions: a.instructions || null,
+      })),
+    });
+  } catch (e) {
+    console.error("[API] d2l/courses/:courseId/assignments error:", e);
+    res.status(500).json({ error: "Failed to fetch assignments", details: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** GET /api/piazza/status — Get Piazza connection status */
+router.get("/piazza/status", async (req: Request, res: Response) => {
+  try {
+    // Try to get Piazza cookie to check if authenticated
+    const cookieHeader = await getPiazzaCookieHeader();
+    const connected = !!cookieHeader;
+
+    // Get last sync time from piazza_posts table
+    const { data: lastPost } = await supabase
+      .from("piazza_posts")
+      .select("updated_at")
+      .eq("user_id", req.userId!)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    // Get classes count
+    const { data: classes, count } = await supabase
+      .from("piazza_posts")
+      .select("course_id", { count: "exact", head: false })
+      .eq("user_id", req.userId!);
+
+    const uniqueClasses = new Set((classes || []).map((c: any) => c.course_id));
+    const classesCount = uniqueClasses.size;
+
+    res.json({
+      connected,
+      lastSync: lastPost?.updated_at || null,
+      classesCount,
+    });
+  } catch (e) {
+    console.error("[API] piazza/status error:", e);
+    res.json({
+      connected: false,
+      lastSync: null,
+      classesCount: 0,
+    });
+  }
+});
+
+/** POST /api/piazza/sync — Sync Piazza posts */
+router.post("/piazza/sync", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const { courseId, sinceDays, maxPosts, highSignalOnly } = req.body || {};
+
+  try {
+    const result = await PiazzaTools.piazza_sync.handler({
+      userId,
+      courseId: courseId || undefined,
+      sinceDays: sinceDays || 21,
+      maxPosts: maxPosts || 40,
+      highSignalOnly: highSignalOnly !== undefined ? highSignalOnly : true,
+    });
+
+    const parsed = JSON.parse(result);
+    
+    if (parsed.success) {
+      res.json({
+        status: "completed",
+        message: "Piazza sync completed successfully",
+        result: parsed,
+      });
+    } else {
+      res.status(500).json({
+        status: "failed",
+        message: parsed.error || "Piazza sync failed",
+        result: parsed,
+      });
+    }
+  } catch (e) {
+    console.error("[API] piazza/sync error:", e);
+    res.status(500).json({
+      status: "failed",
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+});
+
+/** POST /api/piazza/embed-missing — Embed missing Piazza posts */
+router.post("/piazza/embed-missing", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const { courseId, limit, minChars } = req.body || {};
+
+  try {
+    const result = await PiazzaTools.piazza_embed_missing.handler({
+      userId,
+      courseId: courseId || undefined,
+      limit: limit || 100,
+      minChars: minChars || 200,
+    });
+
+    const parsed = JSON.parse(result);
+    
+    if (parsed.success) {
+      res.json({
+        status: "completed",
+        message: "Piazza embedding completed",
+        result: parsed,
+      });
+    } else {
+      res.status(500).json({
+        status: "failed",
+        message: parsed.error || "Piazza embedding failed",
+        result: parsed,
+      });
+    }
+  } catch (e) {
+    console.error("[API] piazza/embed-missing error:", e);
+    res.status(500).json({
+      status: "failed",
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+});
+
+/** GET /api/piazza/search — Search Piazza posts */
+router.get("/piazza/search", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const q = (req.query.q as string)?.trim();
+  const courseId = (req.query.courseId as string) || undefined;
+  const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+
+  if (!q) {
+    res.status(400).json({ error: "query q required" });
+    return;
+  }
+
+  try {
+    const result = await PiazzaTools.piazza_semantic_search.handler({
+      userId,
+      query: q,
+      courseId,
+      topK: limit,
+    });
+
+    const parsed = JSON.parse(result);
+    
+    if (parsed.success && parsed.results) {
+      // Transform results to match expected format
+      const hits = (parsed.results || []).map((r: any) => ({
+        postId: r.post_id || r.id,
+        title: r.title,
+        snippet: r.body || r.preview || "",
+        url: r.url,
+        score: r.similarity || 0,
+        courseId: r.course_id,
+      }));
+      
+      res.json({ hits });
+    } else {
+      res.status(500).json({ error: parsed.error || "Search failed" });
+    }
+  } catch (e) {
+    console.error("[API] piazza/search error:", e);
+    res.status(500).json({ error: "Search failed", details: e instanceof Error ? e.message : String(e) });
+  }
 });
 
 export default router;

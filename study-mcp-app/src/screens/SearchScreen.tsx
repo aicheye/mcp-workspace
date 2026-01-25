@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { searchService } from '../services/search';
 import { SearchHit } from '../types';
 
@@ -48,7 +49,7 @@ export default function SearchScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
@@ -88,37 +89,46 @@ export default function SearchScreen() {
           ) : null
         }
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8fafc',
   },
   searchContainer: {
     flexDirection: 'row',
-    padding: 16,
-    backgroundColor: '#fff',
+    paddingTop: 8,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#e2e8f0',
     gap: 12,
   },
   searchInput: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 14,
     fontSize: 16,
+    backgroundColor: '#f8fafc',
+    color: '#1e293b',
   },
   searchButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 12,
     justifyContent: 'center',
+    shadowColor: '#6366f1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   searchButtonDisabled: {
     opacity: 0.6,
@@ -126,52 +136,73 @@ const styles = StyleSheet.create({
   searchButtonText: {
     color: '#fff',
     fontWeight: '600',
+    fontSize: 15,
   },
   resultsCount: {
-    padding: 16,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 8,
     fontSize: 14,
-    color: '#666',
+    color: '#64748b',
+    fontWeight: '500',
   },
   listContent: {
-    padding: 16,
+    padding: 24,
   },
   resultCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   resultTitle: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 8,
+    color: '#1e293b',
+    marginBottom: 10,
   },
   resultSnippet: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 12,
+    color: '#64748b',
+    marginBottom: 14,
     lineHeight: 20,
   },
   resultMeta: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
   },
   resultScore: {
     fontSize: 12,
-    color: '#999',
+    color: '#94a3b8',
+    fontWeight: '500',
   },
   resultCourse: {
     fontSize: 12,
-    color: '#007AFF',
+    color: '#6366f1',
     fontWeight: '600',
+    backgroundColor: '#ede9fe',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   emptyContainer: {
-    padding: 40,
+    padding: 48,
     alignItems: 'center',
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: '#64748b',
+    fontWeight: '500',
   },
 });

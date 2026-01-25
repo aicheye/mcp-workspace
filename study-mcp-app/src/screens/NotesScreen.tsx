@@ -6,7 +6,9 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { notesService } from '../services/notes';
 import { Note } from '../types';
@@ -59,7 +61,7 @@ export default function NotesScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>My Notes</Text>
         <TouchableOpacity
@@ -86,75 +88,99 @@ export default function NotesScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.centerContainer}>
+              <Text style={{ fontSize: 48, marginBottom: 16 }}>📭</Text>
               <Text style={styles.emptyText}>No notes yet</Text>
               <Text style={styles.emptySubtext}>Upload your first note to get started</Text>
             </View>
           }
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8fafc',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 16,
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#e2e8f0',
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    color: '#1e293b',
   },
   uploadButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+    shadowColor: '#6366f1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   uploadButtonText: {
     color: '#fff',
     fontWeight: '600',
+    fontSize: 14,
   },
   listContent: {
-    padding: 16,
+    padding: 24,
   },
   noteCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   noteTitle: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 4,
+    color: '#1e293b',
+    marginBottom: 8,
   },
   noteCourse: {
-    fontSize: 14,
-    color: '#007AFF',
-    marginBottom: 8,
+    fontSize: 13,
+    color: '#6366f1',
+    fontWeight: '600',
+    marginBottom: 12,
   },
   noteMeta: {
     flexDirection: 'row',
     gap: 16,
-    marginBottom: 8,
+    marginBottom: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
   },
   metaText: {
     fontSize: 12,
-    color: '#666',
+    color: '#64748b',
+    fontWeight: '500',
   },
   noteDate: {
     fontSize: 12,
-    color: '#999',
+    color: '#94a3b8',
+    fontWeight: '500',
   },
   centerContainer: {
     flex: 1,
@@ -163,13 +189,14 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   emptyText: {
-    fontSize: 18,
-    color: '#666',
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1e293b',
     marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#999',
+    color: '#64748b',
     textAlign: 'center',
   },
 });

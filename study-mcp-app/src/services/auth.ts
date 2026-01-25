@@ -6,7 +6,6 @@ import {
   CognitoUserSession,
 } from 'amazon-cognito-identity-js';
 import { userPool, cognitoConfig } from '../config/cognito';
-import { apiClient } from '../config/api';
 import { User } from '../types';
 
 const TOKEN_KEY = 'auth_token';
@@ -35,8 +34,8 @@ export class AuthService {
   async setToken(token: string): Promise<void> {
     try {
       await SecureStore.setItemAsync(TOKEN_KEY, token);
-      // Update API client interceptor
-      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      // Token will be added to requests via the interceptor in api.ts
+      // No need to set it directly here to avoid circular dependency
     } catch (error) {
       console.error('Error setting token:', error);
     }
@@ -564,15 +563,14 @@ export class AuthService {
 
       await SecureStore.deleteItemAsync(TOKEN_KEY);
       await SecureStore.deleteItemAsync(USER_KEY);
-      delete apiClient.defaults.headers.common['Authorization'];
       this.currentUser = null;
+      // Token removal from API client will be handled by the interceptor
     } catch (error) {
       console.error('Error logging out:', error);
       // Still clear local storage even if Cognito signout fails
       try {
         await SecureStore.deleteItemAsync(TOKEN_KEY);
         await SecureStore.deleteItemAsync(USER_KEY);
-        delete apiClient.defaults.headers.common['Authorization'];
         this.currentUser = null;
       } catch (e) {
         console.error('Error clearing local storage:', e);
@@ -589,7 +587,7 @@ export class AuthService {
   async initialize(): Promise<void> {
     const token = await this.getToken();
     if (token) {
-      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      // Token will be added to requests via the interceptor
       await this.getUser();
     }
   }
