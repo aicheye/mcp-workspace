@@ -3,14 +3,52 @@ import { chromium, BrowserContext } from "playwright";
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync } from "fs";
+import { supabase } from "./utils/supabase.js";
 
-const SESSION_PATH = join(homedir(), ".d2l-session");
-
-const D2L_HOST = process.env.D2L_HOST || "learn.ul.ie";
-const D2L_USERNAME = process.env.D2L_USERNAME;
-const D2L_PASSWORD = process.env.D2L_PASSWORD;
 const REMOTE_DEBUG = process.env.REMOTE_DEBUG === "true";
-const HOME_URL = `https://${D2L_HOST}/d2l/home`;
+
+// Get session path for a user (or default)
+function getSessionPath(userId?: string): string {
+  if (userId) {
+    return join(homedir(), `.d2l-session-${userId}`);
+  }
+  return join(homedir(), ".d2l-session");
+}
+
+// Load D2L credentials for a user from database, or fall back to env vars
+async function getD2LCredentials(userId?: string): Promise<{ host: string; username: string; password: string } | null> {
+  if (userId) {
+    try {
+      const { data, error } = await supabase
+        .from("user_credentials")
+        .select("host, username, password")
+        .eq("user_id", userId)
+        .eq("service", "d2l")
+        .single();
+
+      if (!error && data) {
+        return {
+          host: data.host || process.env.D2L_HOST || "learn.ul.ie",
+          username: data.username,
+          password: data.password,
+        };
+      }
+    } catch (e) {
+      console.error("[AUTH] Error loading D2L credentials from DB:", e);
+    }
+  }
+
+  // Fall back to environment variables
+  const host = process.env.D2L_HOST || "learn.ul.ie";
+  const username = process.env.D2L_USERNAME;
+  const password = process.env.D2L_PASSWORD;
+
+  if (username && password) {
+    return { host, username, password };
+  }
+
+  return null;
+}
 
 interface TokenCache {
   token: string;
@@ -28,14 +66,18 @@ function isLoginPage(url: string): boolean {
   );
 }
 
-export async function getToken(): Promise<string> {
+// Per-user token cache
+const userTokenCache: Record<string, TokenCache> = {};
+
+export async function getToken(userId?: string): Promise<string> {
   const authStartTime = Date.now();
+  const cacheKey = userId || "default";
 
   // If D2L_TOKEN is provided via env var, use it directly (bypass browser auth)
   const envToken = process.env.D2L_TOKEN;
   if (envToken) {
     console.error("[AUTH] Using D2L_TOKEN from environment variable");
-    tokenCache = {
+    userTokenCache[cacheKey] = {
       token: envToken,
       expiresAt: Date.now() + 82800000, // 23 hours
     };
@@ -43,22 +85,30 @@ export async function getToken(): Promise<string> {
   }
 
   // Return cached token if still valid (with 1 hour buffer for safety)
-  if (tokenCache.token && Date.now() < tokenCache.expiresAt - 3600000) {
+  if (userTokenCache[cacheKey]?.token && Date.now() < userTokenCache[cacheKey].expiresAt - 3600000) {
     const cacheTime = Date.now() - authStartTime;
-    const timeUntilExpiry = tokenCache.expiresAt - Date.now();
+    const timeUntilExpiry = userTokenCache[cacheKey].expiresAt - Date.now();
     console.error(
-      `[AUTH] Token cache hit (${cacheTime}ms, expires in ${Math.round(
+      `[AUTH] Token cache hit for user ${userId || 'default'} (${cacheTime}ms, expires in ${Math.round(
         timeUntilExpiry / 1000
       )}s)`
     );
-    return tokenCache.token;
+    return userTokenCache[cacheKey].token;
   }
 
-  console.error(`[AUTH] Token cache miss - refreshing token`);
-  const hasExistingSession = existsSync(SESSION_PATH);
+  console.error(`[AUTH] Token cache miss - refreshing token for user ${userId || 'default'}`);
+  const sessionPath = getSessionPath(userId);
+  const hasExistingSession = existsSync(sessionPath);
   console.error(
     `[AUTH] Existing session file: ${hasExistingSession ? "yes" : "no"}`
   );
+
+  // Load credentials
+  const credentials = await getD2LCredentials(userId);
+  const D2L_HOST = credentials?.host || process.env.D2L_HOST || "learn.ul.ie";
+  const D2L_USERNAME = credentials?.username || process.env.D2L_USERNAME;
+  const D2L_PASSWORD = credentials?.password || process.env.D2L_PASSWORD;
+  const HOME_URL = `https://${D2L_HOST}/d2l/home`;
 
   // Configure browser args for remote debugging if enabled
   const browserArgs: string[] = [];
@@ -76,7 +126,7 @@ export async function getToken(): Promise<string> {
   // Always try headless first if session exists - only show browser if login needed
   const browserStartTime = Date.now();
   const isProduction = process.env.NODE_ENV === "production" || !process.env.DISPLAY;
-  let context = await chromium.launchPersistentContext(SESSION_PATH, {
+  let context = await chromium.launchPersistentContext(sessionPath, {
     headless: isProduction || (hasExistingSession && !REMOTE_DEBUG),
     viewport: { width: 1280, height: 720 },
     args: browserArgs.length > 0 ? browserArgs : undefined,
@@ -88,7 +138,7 @@ export async function getToken(): Promise<string> {
 
   try {
     const captureStartTime = Date.now();
-    const result = await captureToken(context, hasExistingSession);
+    const result = await captureToken(context, hasExistingSession, HOME_URL, D2L_USERNAME, D2L_PASSWORD);
     const captureTime = Date.now() - captureStartTime;
     console.error(`[AUTH] Token captured (${captureTime}ms)`);
 
@@ -97,7 +147,7 @@ export async function getToken(): Promise<string> {
       await context.close();
       console.error("[AUTH] Session expired, opening browser for login...");
       const retryBrowserStartTime = Date.now();
-      context = await chromium.launchPersistentContext(SESSION_PATH, {
+      context = await chromium.launchPersistentContext(sessionPath, {
         headless: false,
         viewport: { width: 1280, height: 720 },
         args: browserArgs.length > 0 ? browserArgs : undefined,
@@ -108,11 +158,11 @@ export async function getToken(): Promise<string> {
       );
 
       const retryCaptureStartTime = Date.now();
-      const retryResult = await captureToken(context, false);
+      const retryResult = await captureToken(context, false, HOME_URL, D2L_USERNAME, D2L_PASSWORD);
       const retryCaptureTime = Date.now() - retryCaptureStartTime;
       console.error(`[AUTH] Token captured on retry (${retryCaptureTime}ms)`);
 
-      tokenCache = {
+      userTokenCache[cacheKey] = {
         token: retryResult.token,
         expiresAt: Date.now() + 82800000, // 23 hours
       };
@@ -121,7 +171,7 @@ export async function getToken(): Promise<string> {
       return retryResult.token;
     }
 
-    tokenCache = {
+    userTokenCache[cacheKey] = {
       token: result.token,
       expiresAt: Date.now() + 82800000, // 23 hours
     };
@@ -138,7 +188,10 @@ export async function getToken(): Promise<string> {
 
 async function captureToken(
   context: BrowserContext,
-  quickCheck: boolean
+  quickCheck: boolean,
+  homeUrl: string,
+  username?: string | null,
+  password?: string | null
 ): Promise<{ token: string; needsLogin: boolean }> {
   const captureStartTime = Date.now();
   console.error(`[AUTH] Starting token capture (quickCheck: ${quickCheck})`);
@@ -163,8 +216,8 @@ async function captureToken(
 
   // Go to home page
   const navigateStartTime = Date.now();
-  console.error(`[AUTH] Navigating to ${HOME_URL}`);
-  await page.goto(HOME_URL, { waitUntil: "networkidle" });
+  console.error(`[AUTH] Navigating to ${homeUrl}`);
+  await page.goto(homeUrl, { waitUntil: "networkidle" });
   const navigateTime = Date.now() - navigateStartTime;
   console.error(`[AUTH] Navigation completed (${navigateTime}ms)`);
 
@@ -177,11 +230,11 @@ async function captureToken(
 
   if (isOnLoginPage) {
     console.error(`[AUTH] Login required`);
-    // If username and password are provided via env vars, use them for login
-    if (D2L_USERNAME && D2L_PASSWORD) {
+    // If username and password are provided, use them for login
+    if (username && password) {
       console.error(`[AUTH] Attempting automated login with credentials`);
-      console.error(`[AUTH] Username configured: ${D2L_USERNAME ? 'yes' : 'no'}`);
-      console.error(`[AUTH] Password configured: ${D2L_PASSWORD ? 'yes (hidden)' : 'no'}`);
+      console.error(`[AUTH] Username configured: ${username ? 'yes' : 'no'}`);
+      console.error(`[AUTH] Password configured: ${password ? 'yes (hidden)' : 'no'}`);
       try {
         // Try to find and fill username field (common selectors)
         const usernameSelectors = [
@@ -237,7 +290,7 @@ async function captureToken(
 
         // Fill username first - password field might appear after
         console.error(`[AUTH] Filling username field...`);
-        await usernameField.fill(D2L_USERNAME);
+        await usernameField.fill(username);
         
         // Look for a "Next" or "Continue" button (common in multi-step forms)
         console.error(`[AUTH] Looking for Next/Continue button...`);
@@ -296,7 +349,7 @@ async function captureToken(
 
         // Fill password
         console.error(`[AUTH] Filling password field...`);
-        await passwordField.fill(D2L_PASSWORD);
+        await passwordField.fill(password);
         console.error(`[AUTH] Credentials filled, looking for submit button...`);
 
           // Try to find and click submit button
@@ -460,16 +513,22 @@ async function captureToken(
   return { token: capturedToken, needsLogin: false };
 }
 
-export async function refreshTokenIfNeeded(): Promise<string> {
-  return getToken();
+export async function refreshTokenIfNeeded(userId?: string): Promise<string> {
+  return getToken(userId);
 }
 
-export function clearTokenCache(): void {
-  tokenCache = { token: "", expiresAt: 0 };
+export function clearTokenCache(userId?: string): void {
+  const cacheKey = userId || "default";
+  if (userId) {
+    delete userTokenCache[cacheKey];
+  } else {
+    userTokenCache[cacheKey] = { token: "", expiresAt: 0 };
+  }
 }
 
-export function getTokenExpiry(): number {
-  return tokenCache.expiresAt;
+export function getTokenExpiry(userId?: string): number {
+  const cacheKey = userId || "default";
+  return userTokenCache[cacheKey]?.expiresAt || 0;
 }
 
 export async function getAuthenticatedContext(): Promise<BrowserContext> {
@@ -488,7 +547,7 @@ export async function getAuthenticatedContext(): Promise<BrowserContext> {
   let currentUrl = page.url();
   if (isLoginPage(currentUrl)) {
     // If username and password are provided via env vars, use them for login
-    if (D2L_USERNAME && D2L_PASSWORD) {
+    if (username && password) {
       try {
         // Try to find and fill username field
         const usernameSelectors = [
@@ -539,7 +598,7 @@ export async function getAuthenticatedContext(): Promise<BrowserContext> {
         }
 
         // Fill username first
-        await usernameField.fill(D2L_USERNAME);
+        await usernameField.fill(username);
         
         // Look for Next button in multi-step forms
         const nextButtonSelectors = [
@@ -590,7 +649,7 @@ export async function getAuthenticatedContext(): Promise<BrowserContext> {
           throw new Error("Could not find password field");
         }
 
-        await passwordField.fill(D2L_PASSWORD);
+        await passwordField.fill(password);
 
         const submitSelectors = [
           'input[type="submit"]',

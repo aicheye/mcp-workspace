@@ -25,12 +25,13 @@ export class D2LService {
   }
 
   /**
-   * Connect to D2L (OAuth flow or credentials)
+   * Connect to D2L (store credentials)
    */
-  async connect(credentials?: { username?: string; password?: string }): Promise<void> {
-    // TODO: Implement API endpoint: POST /api/d2l/connect
-    // This might trigger OAuth flow or store credentials
-    throw new Error('D2L connection not yet implemented');
+  async connect(credentials: { host: string; username: string; password: string }): Promise<void> {
+    const response = await apiClient.post('/api/d2l/connect', credentials);
+    if (response.status !== 200) {
+      throw new Error('Failed to connect to D2L');
+    }
   }
 
   /**

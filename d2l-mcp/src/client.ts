@@ -10,18 +10,27 @@ interface ApiResponse<T = unknown> {
 }
 
 export class D2LClient {
+  private userId?: string;
+  private host?: string;
+
+  constructor(userId?: string, host?: string) {
+    this.userId = userId;
+    this.host = host;
+  }
+
   private async request<T>(
     method: string,
     path: string,
     body?: unknown
   ): Promise<ApiResponse<T>> {
     const requestStartTime = Date.now();
-    const url = `${BASE_URL}${path}`;
+    const baseUrl = this.host ? `https://${this.host}` : BASE_URL;
+    const url = `${baseUrl}${path}`;
 
     console.error(`[API] Starting ${method} request to: ${path}`);
 
     const tokenStartTime = Date.now();
-    const token = await getToken();
+    const token = await getToken(this.userId);
     const tokenTime = Date.now() - tokenStartTime;
     console.error(`[API] Token obtained (${tokenTime}ms)`);
 

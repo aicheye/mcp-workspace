@@ -9,7 +9,7 @@ import { ingestPdfBuffer, embedNoteSections, generateEmbedding, NotesTools } fro
 import { isS3Configured, presignUpload, getObjectBuffer, getBucket } from "./s3.js";
 import { SyncTools } from "../study/src/sync.js";
 import { PiazzaTools } from "../study/src/piazza.js";
-import { client } from "../client.js";
+import { D2LClient } from "../client.js";
 import { getToken } from "../auth.js";
 import { getPiazzaCookieHeader } from "../study/piazzaAuth.js";
 
@@ -296,11 +296,58 @@ router.post("/notes/embed-missing", async (req: Request, res: Response) => {
   }
 });
 
+/** POST /api/d2l/connect — Store D2L credentials for user */
+router.post("/d2l/connect", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const { host, username, password } = req.body || {};
+
+  if (!host || !username || !password) {
+    res.status(400).json({ error: "host, username, and password required" });
+    return;
+  }
+
+  try {
+    // Store credentials in database (encrypted in production)
+    // For now, we'll store them in a user_credentials table or use environment variables per user
+    // Since the backend uses env vars, we'll need to update the auth.ts to support per-user credentials
+    // For MVP, we'll store them and the backend will need to be updated to use them
+    
+    // Store in a simple table for now (you may want to encrypt these)
+    const { error } = await supabase
+      .from("user_credentials")
+      .upsert({
+        user_id: userId,
+        service: "d2l",
+        host: host,
+        username: username,
+        password: password, // TODO: Encrypt this in production
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: "user_id,service"
+      });
+
+    if (error) {
+      console.error("[API] d2l/connect error:", error);
+      res.status(500).json({ error: "Failed to store credentials" });
+      return;
+    }
+
+    res.json({ 
+      status: "connected",
+      message: "D2L credentials stored successfully"
+    });
+  } catch (e) {
+    console.error("[API] d2l/connect error:", e);
+    res.status(500).json({ error: "Failed to connect", details: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 /** GET /api/d2l/status — Get D2L connection status */
 router.get("/d2l/status", async (req: Request, res: Response) => {
+  const userId = req.userId!;
   try {
     // Try to get a token to check if D2L is authenticated
-    const token = await getToken();
+    const token = await getToken(userId);
     const connected = !!token;
 
     // Get last sync time from tasks table
@@ -317,6 +364,15 @@ router.get("/d2l/status", async (req: Request, res: Response) => {
     let coursesCount = 0;
     if (connected) {
       try {
+        // Get user's D2L host from credentials
+        const { data: creds } = await supabase
+          .from("user_credentials")
+          .select("host")
+          .eq("user_id", userId)
+          .eq("service", "d2l")
+          .single();
+        
+        const client = new D2LClient(userId, creds?.host);
         const enrollments = await client.getMyEnrollments() as { Items: any[] };
         coursesCount = enrollments?.Items?.filter(
           (e: any) => e.OrgUnit?.Type?.Code === "Course Offering" && e.Access?.IsActive && e.Access?.CanAccess
@@ -373,7 +429,17 @@ router.post("/d2l/sync", async (req: Request, res: Response) => {
 
 /** GET /api/d2l/courses — Get enrolled courses */
 router.get("/d2l/courses", async (req: Request, res: Response) => {
+  const userId = req.userId!;
   try {
+    // Get user's D2L host from credentials
+    const { data: creds } = await supabase
+      .from("user_credentials")
+      .select("host")
+      .eq("user_id", userId)
+      .eq("service", "d2l")
+      .single();
+    
+    const client = new D2LClient(userId, creds?.host);
     const enrollments = await client.getMyEnrollments() as { Items: any[] };
     
     const courses = enrollments.Items
@@ -400,6 +466,7 @@ router.get("/d2l/courses", async (req: Request, res: Response) => {
 
 /** GET /api/d2l/courses/:courseId/assignments — Get assignments for a course */
 router.get("/d2l/courses/:courseId/assignments", async (req: Request, res: Response) => {
+  const userId = req.userId!;
   const { courseId } = req.params;
   const orgUnitId = parseInt(courseId, 10);
 
@@ -409,6 +476,15 @@ router.get("/d2l/courses/:courseId/assignments", async (req: Request, res: Respo
   }
 
   try {
+    // Get user's D2L host from credentials
+    const { data: creds } = await supabase
+      .from("user_credentials")
+      .select("host")
+      .eq("user_id", userId)
+      .eq("service", "d2l")
+      .single();
+    
+    const client = new D2LClient(userId, creds?.host);
     const { assignmentTools } = await import("../tools/dropbox.js");
     const folders = await client.getDropboxFolders(orgUnitId) as any[];
     const { marshalAssignments } = await import("../utils/marshal.js");
@@ -428,11 +504,52 @@ router.get("/d2l/courses/:courseId/assignments", async (req: Request, res: Respo
   }
 });
 
+/** POST /api/piazza/connect — Store Piazza credentials for user */
+router.post("/piazza/connect", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const { email, password } = req.body || {};
+
+  if (!email || !password) {
+    res.status(400).json({ error: "email and password required" });
+    return;
+  }
+
+  try {
+    // Store credentials in database
+    const { error } = await supabase
+      .from("user_credentials")
+      .upsert({
+        user_id: userId,
+        service: "piazza",
+        email: email,
+        password: password, // TODO: Encrypt this in production
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: "user_id,service"
+      });
+
+    if (error) {
+      console.error("[API] piazza/connect error:", error);
+      res.status(500).json({ error: "Failed to store credentials" });
+      return;
+    }
+
+    res.json({ 
+      status: "connected",
+      message: "Piazza credentials stored successfully"
+    });
+  } catch (e) {
+    console.error("[API] piazza/connect error:", e);
+    res.status(500).json({ error: "Failed to connect", details: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 /** GET /api/piazza/status — Get Piazza connection status */
 router.get("/piazza/status", async (req: Request, res: Response) => {
+  const userId = req.userId!;
   try {
     // Try to get Piazza cookie to check if authenticated
-    const cookieHeader = await getPiazzaCookieHeader();
+    const cookieHeader = await getPiazzaCookieHeader(userId);
     const connected = !!cookieHeader;
 
     // Get last sync time from piazza_posts table

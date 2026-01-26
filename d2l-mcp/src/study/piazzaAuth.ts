@@ -3,8 +3,48 @@ import { chromium, BrowserContext } from "playwright";
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync } from "fs";
+import { supabase } from "../utils/supabase.js";
 
-const SESSION_PATH = join(homedir(), ".piazza-session");
+// Get session path for a user (or default)
+function getSessionPath(userId?: string): string {
+  if (userId) {
+    return join(homedir(), `.piazza-session-${userId}`);
+  }
+  return join(homedir(), ".piazza-session");
+}
+
+// Load Piazza credentials for a user from database, or fall back to env vars
+async function getPiazzaCredentials(userId?: string): Promise<{ email: string; password: string } | null> {
+  if (userId) {
+    try {
+      const { data, error } = await supabase
+        .from("user_credentials")
+        .select("email, password")
+        .eq("user_id", userId)
+        .eq("service", "piazza")
+        .single();
+
+      if (!error && data) {
+        return {
+          email: data.email,
+          password: data.password,
+        };
+      }
+    } catch (e) {
+      console.error("[PIAZZA_AUTH] Error loading Piazza credentials from DB:", e);
+    }
+  }
+
+  // Fall back to environment variables (if they exist)
+  const email = process.env.PIAZZA_USERNAME;
+  const password = process.env.PIAZZA_PASSWORD;
+
+  if (email && password) {
+    return { email, password };
+  }
+
+  return null;
+}
 
 // Pick a URL that reliably requires auth and lands you inside Piazza when logged in.
 // You can use piazza.com and then navigate to a class page after.
@@ -48,8 +88,9 @@ async function isLoggedIn(page: import("playwright").Page): Promise<boolean> {
   }
 }
 
-export async function getPiazzaAuthenticatedContext(): Promise<BrowserContext> {
-  const hasExistingSession = existsSync(SESSION_PATH);
+export async function getPiazzaAuthenticatedContext(userId?: string): Promise<BrowserContext> {
+  const sessionPath = getSessionPath(userId);
+  const hasExistingSession = existsSync(sessionPath);
 
   const browserArgs: string[] = [];
   if (REMOTE_DEBUG) {
@@ -58,7 +99,7 @@ export async function getPiazzaAuthenticatedContext(): Promise<BrowserContext> {
   }
 
   // Try headless first only if we have an existing session
-  let context = await chromium.launchPersistentContext(SESSION_PATH, {
+  let context = await chromium.launchPersistentContext(sessionPath, {
     headless: hasExistingSession && !REMOTE_DEBUG,
     viewport: { width: 1280, height: 720 },
     args: browserArgs.length ? browserArgs : undefined,
@@ -79,7 +120,7 @@ export async function getPiazzaAuthenticatedContext(): Promise<BrowserContext> {
     if (hasExistingSession && !REMOTE_DEBUG) {
       await context.close();
       console.error("[PIAZZA_AUTH] Session expired, reopening browser for login...");
-      context = await chromium.launchPersistentContext(SESSION_PATH, {
+      context = await chromium.launchPersistentContext(sessionPath, {
         headless: false,
         viewport: { width: 1280, height: 720 },
         args: browserArgs.length ? browserArgs : undefined,
@@ -113,8 +154,8 @@ export async function getPiazzaAuthenticatedContext(): Promise<BrowserContext> {
   return context;
 }
 
-export async function getPiazzaCookieHeader(): Promise<string> {
-  const context = await getPiazzaAuthenticatedContext();
+export async function getPiazzaCookieHeader(userId?: string): Promise<string> {
+  const context = await getPiazzaAuthenticatedContext(userId);
   try {
     const cookies = await context.cookies(["https://piazza.com"]);
     // Build a Cookie header: "name=value; name2=value2"

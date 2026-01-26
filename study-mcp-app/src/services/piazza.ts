@@ -25,11 +25,13 @@ export class PiazzaService {
   }
 
   /**
-   * Connect to Piazza (credentials or OAuth)
+   * Connect to Piazza (store credentials or trigger browser login)
    */
-  async connect(credentials?: { email?: string; password?: string }): Promise<void> {
-    // TODO: Implement API endpoint: POST /api/piazza/connect
-    throw new Error('Piazza connection not yet implemented');
+  async connect(credentials: { email: string; password: string }): Promise<void> {
+    const response = await apiClient.post('/api/piazza/connect', credentials);
+    if (response.status !== 200) {
+      throw new Error('Failed to connect to Piazza');
+    }
   }
 
   /**

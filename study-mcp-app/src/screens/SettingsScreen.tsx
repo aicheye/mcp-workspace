@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { d2lService } from '../services/d2l';
 import { piazzaService } from '../services/piazza';
@@ -23,6 +24,7 @@ interface IntegrationStatus {
 
 export default function SettingsScreen() {
   const { user, logout } = useAuth();
+  const navigation = useNavigation();
   const [d2lStatus, setD2lStatus] = useState<IntegrationStatus>({
     connected: false,
     syncing: false,
@@ -35,6 +37,13 @@ export default function SettingsScreen() {
   useEffect(() => {
     loadIntegrationStatus();
   }, []);
+
+  // Reload status when screen comes into focus (e.g., after connecting)
+  useFocusEffect(
+    React.useCallback(() => {
+      loadIntegrationStatus();
+    }, [])
+  );
 
   const loadIntegrationStatus = async () => {
     try {
@@ -50,12 +59,8 @@ export default function SettingsScreen() {
   };
 
   const handleD2LConnect = async () => {
-    // TODO: Navigate to D2L connection screen or open browser for OAuth
-    Alert.alert(
-      'Connect to D2L',
-      'D2L connection will be implemented. This will allow you to sync courses, assignments, and content.',
-      [{ text: 'OK' }]
-    );
+    // @ts-ignore - navigation type will be fixed later
+    navigation.navigate('D2LConnect');
   };
 
   const handleD2LSync = async () => {
@@ -72,12 +77,8 @@ export default function SettingsScreen() {
   };
 
   const handlePiazzaConnect = async () => {
-    // TODO: Navigate to Piazza connection screen
-    Alert.alert(
-      'Connect to Piazza',
-      'Piazza connection will be implemented. This will allow you to sync posts and discussions.',
-      [{ text: 'OK' }]
-    );
+    // @ts-ignore - navigation type will be fixed later
+    navigation.navigate('PiazzaConnect');
   };
 
   const handlePiazzaSync = async () => {

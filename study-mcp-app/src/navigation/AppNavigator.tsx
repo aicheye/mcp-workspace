@@ -7,6 +7,8 @@ import { useAuth } from '../context/AuthContext';
 import LoginScreen from '../screens/Auth/LoginScreen';
 import SignUpScreen from '../screens/Auth/SignUpScreen';
 import VerifyEmailScreen from '../screens/Auth/VerifyEmailScreen';
+import D2LConnectScreen from '../screens/Auth/D2LConnectScreen';
+import PiazzaConnectScreen from '../screens/Auth/PiazzaConnectScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import NotesScreen from '../screens/NotesScreen';
 import SearchScreen from '../screens/SearchScreen';
@@ -97,6 +99,22 @@ export default function AppNavigator() {
                 presentation: 'modal',
                 headerShown: true,
                 title: 'Upload Note',
+              }}
+            />
+            <Stack.Screen
+              name="D2LConnect"
+              component={D2LConnectScreen}
+              options={{
+                headerShown: true,
+                title: 'Connect D2L',
+              }}
+            />
+            <Stack.Screen
+              name="PiazzaConnect"
+              component={PiazzaConnectScreen}
+              options={{
+                headerShown: true,
+                title: 'Connect Piazza',
               }}
             />
           </>

@@ -182,7 +182,7 @@ export const PiazzaTools = {
           return JSON.stringify({ success: false, error: `Course ${courseId} not found in piazza_map.json` }, null, 2);
         }
 
-        const cookieHeader = await getPiazzaCookieHeader();
+        const cookieHeader = await getPiazzaCookieHeader(userId);
         const cutoffMs = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
 
         let totalFetched = 0;
