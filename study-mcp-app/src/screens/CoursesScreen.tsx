@@ -23,7 +23,7 @@ interface Course {
 }
 
 export default function CoursesScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const { user } = useAuth();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,7 +58,7 @@ export default function CoursesScreen() {
   const renderCourse = ({ item }: { item: Course }) => (
     <TouchableOpacity
       style={styles.courseCard}
-      onPress={() => navigation.navigate('CourseDetail' as never, { course: item } as never)}
+      onPress={() => navigation.navigate('CourseDetail', { course: item })}
     >
       <View style={styles.courseHeader}>
         <View style={styles.courseIcon}>
@@ -87,7 +87,7 @@ export default function CoursesScreen() {
   if (error) {
     return (
       <View style={styles.centerContainer}>
-        <AntDesign name="exclamationcircleo" size={48} color="#ef4444" />
+        <AntDesign name="exclamation-circle" size={48} color="#ef4444" />
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={loadCourses}>
           <Text style={styles.retryButtonText}>Retry</Text>

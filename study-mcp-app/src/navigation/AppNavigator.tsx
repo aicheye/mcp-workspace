@@ -9,6 +9,7 @@ import LoginScreen from '../screens/Auth/LoginScreen';
 import SignUpScreen from '../screens/Auth/SignUpScreen';
 import VerifyEmailScreen from '../screens/Auth/VerifyEmailScreen';
 import D2LConnectScreen from '../screens/Auth/D2LConnectScreen';
+import D2LWebViewScreen from '../screens/Auth/D2LWebViewScreen';
 import PiazzaConnectScreen from '../screens/Auth/PiazzaConnectScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import NotesScreen from '../screens/NotesScreen';
@@ -125,6 +126,13 @@ export default function AppNavigator() {
               options={{
                 headerShown: true,
                 title: 'Connect D2L',
+              }}
+            />
+            <Stack.Screen
+              name="D2LWebView"
+              component={D2LWebViewScreen}
+              options={{
+                headerShown: false,
               }}
             />
             <Stack.Screen

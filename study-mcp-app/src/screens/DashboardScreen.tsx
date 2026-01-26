@@ -30,7 +30,16 @@ export default function DashboardScreen() {
     } catch (error: any) {
       console.error('Error loading dashboard:', error);
       // Show user-friendly error message
-      if (error.response?.status === 502 || error.response?.status === 504) {
+      if (error.response?.status === 401) {
+        // Unauthorized - token issue
+        const errorMsg = error.response?.data?.error || 'Authentication failed';
+        console.warn('Unauthorized (401):', errorMsg);
+        Alert.alert(
+          'Authentication Error',
+          errorMsg + '\n\nPlease try logging out and logging back in.',
+          [{ text: 'OK' }]
+        );
+      } else if (error.response?.status === 502 || error.response?.status === 504) {
         // Backend not available or timeout
         console.warn('Backend server not available or timed out. Make sure the backend is running.');
       } else if (error.response?.status === 503) {

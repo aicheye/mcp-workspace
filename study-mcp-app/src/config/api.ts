@@ -36,8 +36,13 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid, logout user
-      await authService.logout();
+      console.error('[API] 401 Unauthorized:', {
+        url: error.config?.url,
+        hasToken: !!error.config?.headers?.Authorization,
+        errorMessage: error.response?.data?.error || error.message,
+      });
+      // Don't auto-logout on 401 - might be a temporary issue
+      // Let the calling code handle it
     }
     return Promise.reject(error);
   }

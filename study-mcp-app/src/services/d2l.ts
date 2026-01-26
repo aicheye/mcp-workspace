@@ -42,7 +42,43 @@ export class D2LService {
   }
 
   /**
-   * Connect to D2L (store credentials)
+   * Connect to D2L using a token (from WebView login)
+   */
+  async connectWithToken(credentials: { host: string; token: string }): Promise<void> {
+    try {
+      console.log('[D2L] Storing token...');
+      
+      const isHealthy = await this.checkBackendHealth();
+      if (!isHealthy) {
+        throw new Error('Cannot reach backend server. Please make sure the backend is running on ' + 
+          (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://api.hamzaammar.ca'));
+      }
+      
+      const response = await apiClient.post('/api/d2l/token', credentials, {
+        timeout: 30000,
+      });
+      if (response.status !== 200) {
+        throw new Error(response.data?.error || 'Failed to store token');
+      }
+      console.log('[D2L] Token stored successfully');
+    } catch (error: any) {
+      console.error('[D2L] Token storage error:', error);
+      if (error.code === 'ECONNREFUSED' || error.message?.includes('Cannot reach backend')) {
+        throw error;
+      }
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        throw new Error('Connection timeout. Please try again.');
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response.data?.error || 'Invalid or expired token');
+      }
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to store token';
+      throw new Error(errorMessage);
+    }
+  }
+
+  /**
+   * Connect to D2L (store credentials) - Legacy method
    */
   async connect(credentials: { host: string; username: string; password: string }): Promise<void> {
     try {

@@ -15,6 +15,32 @@ function getSessionPath(userId?: string): string {
   return join(homedir(), ".d2l-session");
 }
 
+// Load D2L token for a user from database
+async function getD2LToken(userId?: string): Promise<{ host: string; token: string } | null> {
+  if (userId) {
+    try {
+      const { data, error } = await supabase
+        .from("user_credentials")
+        .select("host, token")
+        .eq("user_id", userId)
+        .eq("service", "d2l")
+        .limit(1);
+      
+      const cred = Array.isArray(data) ? data[0] : data;
+
+      if (!error && cred && cred.token) {
+        return {
+          host: cred.host || process.env.D2L_HOST || "learn.ul.ie",
+          token: cred.token,
+        };
+      }
+    } catch (e) {
+      console.error("[AUTH] Error loading D2L token from DB:", e);
+    }
+  }
+  return null;
+}
+
 // Load D2L credentials for a user from database, or fall back to env vars
 async function getD2LCredentials(userId?: string): Promise<{ host: string; username: string; password: string } | null> {
   if (userId) {
@@ -24,13 +50,15 @@ async function getD2LCredentials(userId?: string): Promise<{ host: string; usern
         .select("host, username, password")
         .eq("user_id", userId)
         .eq("service", "d2l")
-        .single();
+        .limit(1);
+      
+      const cred = Array.isArray(data) ? data[0] : data;
 
-      if (!error && data) {
+      if (!error && cred && cred.username && cred.password) {
         return {
-          host: data.host || process.env.D2L_HOST || "learn.ul.ie",
-          username: data.username,
-          password: data.password,
+          host: cred.host || process.env.D2L_HOST || "learn.ul.ie",
+          username: cred.username,
+          password: cred.password,
         };
       }
     } catch (e) {
@@ -73,15 +101,46 @@ export async function getToken(userId?: string): Promise<string> {
   const authStartTime = Date.now();
   const cacheKey = userId || "default";
 
-  // If D2L_TOKEN is provided via env var, use it directly (bypass browser auth)
-  const envToken = process.env.D2L_TOKEN;
-  if (envToken) {
-    console.error("[AUTH] Using D2L_TOKEN from environment variable");
-    userTokenCache[cacheKey] = {
-      token: envToken,
-      expiresAt: Date.now() + 82800000, // 23 hours
-    };
-    return envToken;
+  // If userId is provided, check for stored token first (from WebView login)
+  if (userId) {
+    const userToken = await getD2LToken(userId);
+    if (userToken && userToken.token) {
+      console.error(`[AUTH] Using stored token for user ${userId}`);
+      userTokenCache[cacheKey] = {
+        token: userToken.token,
+        expiresAt: Date.now() + 82800000, // 23 hours (tokens typically last 23h)
+      };
+      return userToken.token;
+    }
+
+    // Fall back to credentials if no token
+    const userCreds = await getD2LCredentials(userId);
+    if (userCreds && userCreds.username && userCreds.password) {
+      console.error(`[AUTH] Using user-specific credentials for user ${userId}`);
+      // Continue to authentication flow below
+    } else {
+      // User has no credentials, check env token as fallback
+      const envToken = process.env.D2L_TOKEN;
+      if (envToken) {
+        console.error(`[AUTH] No user credentials found, using D2L_TOKEN from environment variable`);
+        userTokenCache[cacheKey] = {
+          token: envToken,
+          expiresAt: Date.now() + 82800000, // 23 hours
+        };
+        return envToken;
+      }
+    }
+  } else {
+    // No userId - use env token if available (legacy behavior)
+    const envToken = process.env.D2L_TOKEN;
+    if (envToken) {
+      console.error("[AUTH] Using D2L_TOKEN from environment variable (no userId)");
+      userTokenCache[cacheKey] = {
+        token: envToken,
+        expiresAt: Date.now() + 82800000, // 23 hours
+      };
+      return envToken;
+    }
   }
 
   // Return cached token if still valid (with 1 hour buffer for safety)

@@ -11,14 +11,23 @@ RUN apk add --no-cache \
     ttf-freefont \
     udev \
     ttf-opensans \
-    bash
+    bash \
+    libstdc++ \
+    libgcc
 
 WORKDIR /app
 
+# Copy package files
 COPY package*.json ./
-RUN npm ci --production && \
+
+# Install all dependencies (including devDependencies for Playwright)
+RUN npm ci && \
     npx playwright install chromium && \
-    npx playwright install chromium-headless-shell || true
+    npx playwright install chromium-headless-shell
+
+# Remove devDependencies to reduce image size (but keep Playwright binaries)
+# Note: We skip install-deps because we already installed Alpine packages manually above
+RUN npm prune --production
 
 COPY dist ./dist
 COPY scripts ./scripts

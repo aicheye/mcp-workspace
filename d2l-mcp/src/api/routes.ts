@@ -297,6 +297,64 @@ router.post("/notes/embed-missing", async (req: Request, res: Response) => {
 });
 
 /** POST /api/d2l/connect — Store D2L credentials for user */
+/** POST /api/d2l/token — Store D2L token directly (from WebView login) */
+router.post("/d2l/token", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const { host, token } = req.body || {};
+
+  if (!host || !token) {
+    res.status(400).json({ error: "host and token required" });
+    return;
+  }
+
+  try {
+    // Store token in user_credentials table
+    const { error } = await supabase
+      .from("user_credentials")
+      .upsert({
+        user_id: userId,
+        service: "d2l",
+        host: host,
+        token: token, // Store the token directly
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: "user_id,service"
+      });
+
+    if (error) {
+      console.error("[API] d2l/token error:", error);
+      res.status(500).json({ error: "Failed to store token" });
+      return;
+    }
+
+    // Verify token works by making a test API call
+    try {
+      // Clear token cache to force refresh
+      const { clearTokenCache } = await import("../auth.js");
+      clearTokenCache(userId);
+      
+      const client = new D2LClient(userId, host);
+      // This will use the stored token from getToken()
+      await client.getMyEnrollments();
+      
+      res.json({ 
+        status: "connected",
+        message: "D2L token stored and verified successfully"
+      });
+    } catch (verifyError) {
+      console.error("[API] d2l/token verification failed:", verifyError);
+      // Don't delete the token - let user retry
+      res.status(400).json({ 
+        error: "Invalid or expired token. Please try logging in again.",
+        details: verifyError instanceof Error ? verifyError.message : String(verifyError)
+      });
+    }
+  } catch (e) {
+    console.error("[API] d2l/token error:", e);
+    res.status(500).json({ error: "Failed to store token", details: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 router.post("/d2l/connect", async (req: Request, res: Response) => {
   const userId = req.userId!;
   const { host, username, password } = req.body || {};
@@ -341,7 +399,7 @@ router.post("/d2l/connect", async (req: Request, res: Response) => {
       });
     } catch (authError) {
       // Authentication failed - remove the credentials we just stored
-      await supabase
+      const deleteResult = await supabase
         .from("user_credentials")
         .delete()
         .eq("user_id", userId)
@@ -350,8 +408,13 @@ router.post("/d2l/connect", async (req: Request, res: Response) => {
       console.error("[API] d2l/connect authentication failed:", authError);
       const errorMessage = authError instanceof Error ? authError.message : String(authError);
       
-      // Provide user-friendly error messages
-      if (errorMessage.includes("login") || errorMessage.includes("password") || errorMessage.includes("credentials")) {
+      // Check for browser launch failures (Playwright not installed)
+      if (errorMessage.includes("ENOENT") || errorMessage.includes("spawn") || errorMessage.includes("chromium") || errorMessage.includes("playwright")) {
+        res.status(500).json({ 
+          error: "Browser automation is not available. Please contact support.",
+          details: "Playwright/Chromium is not installed in the backend container."
+        });
+      } else if (errorMessage.includes("login") || errorMessage.includes("password") || errorMessage.includes("credentials") || errorMessage.includes("Invalid") || errorMessage.includes("incorrect")) {
         res.status(401).json({ 
           error: "Invalid D2L credentials. Please check your username and password.",
           details: errorMessage
@@ -379,19 +442,20 @@ router.get("/d2l/status", async (req: Request, res: Response) => {
       .select("host, username, updated_at")
       .eq("user_id", userId)
       .eq("service", "d2l")
-      .single();
+      .maybeSingle();
     
     const connected = !credError && !!creds && !!creds.username;
 
     // Get last sync time from tasks table
-    const { data: lastTask } = await supabase
+    const { data: lastTaskData } = await supabase
       .from("tasks")
       .select("created_at")
       .eq("user_id", req.userId!)
       .eq("source", "d2l")
       .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
+    
+    const lastTask = Array.isArray(lastTaskData) ? lastTaskData[0] : lastTaskData;
 
     // Get courses count (optional - don't fail if this doesn't work)
     let coursesCount = 0;
@@ -458,14 +522,20 @@ router.get("/d2l/courses", async (req: Request, res: Response) => {
   const userId = req.userId!;
   try {
     // Get user's D2L host from credentials
-    const { data: creds } = await supabase
+    const { data: credsData } = await supabase
       .from("user_credentials")
       .select("host")
       .eq("user_id", userId)
       .eq("service", "d2l")
-      .single();
+      .limit(1);
     
-    const client = new D2LClient(userId, creds?.host);
+    const creds = Array.isArray(credsData) ? credsData[0] : credsData;
+    if (!creds) {
+      res.status(404).json({ error: "D2L credentials not found. Please connect D2L first." });
+      return;
+    }
+    
+    const client = new D2LClient(userId, creds.host);
     const enrollments = await client.getMyEnrollments() as { Items: any[] };
     
     const courses = enrollments.Items
@@ -503,14 +573,20 @@ router.get("/d2l/courses/:courseId/announcements", async (req: Request, res: Res
 
   try {
     // Get user's D2L host from credentials
-    const { data: creds } = await supabase
+    const { data: credsData } = await supabase
       .from("user_credentials")
       .select("host")
       .eq("user_id", userId)
       .eq("service", "d2l")
-      .single();
+      .limit(1);
     
-    const client = new D2LClient(userId, creds?.host);
+    const creds = Array.isArray(credsData) ? credsData[0] : credsData;
+    if (!creds) {
+      res.status(404).json({ error: "D2L credentials not found. Please connect D2L first." });
+      return;
+    }
+    
+    const client = new D2LClient(userId, creds.host);
     const news = await client.getNews(orgUnitId) as any[];
     const { marshalAnnouncements } = await import("../utils/marshal.js");
     const announcements = marshalAnnouncements(news);
@@ -538,14 +614,20 @@ router.get("/d2l/courses/:courseId/assignments", async (req: Request, res: Respo
 
   try {
     // Get user's D2L host from credentials
-    const { data: creds } = await supabase
+    const { data: credsData } = await supabase
       .from("user_credentials")
       .select("host")
       .eq("user_id", userId)
       .eq("service", "d2l")
-      .single();
+      .limit(1);
     
-    const client = new D2LClient(userId, creds?.host);
+    const creds = Array.isArray(credsData) ? credsData[0] : credsData;
+    if (!creds) {
+      res.status(404).json({ error: "D2L credentials not found. Please connect D2L first." });
+      return;
+    }
+    
+    const client = new D2LClient(userId, creds.host);
     const { assignmentTools } = await import("../tools/dropbox.js");
     const folders = await client.getDropboxFolders(orgUnitId) as any[];
     const { marshalAssignments } = await import("../utils/marshal.js");
@@ -610,12 +692,14 @@ router.get("/piazza/status", async (req: Request, res: Response) => {
   const userId = req.userId!;
   try {
     // Check if credentials exist in database
-    const { data: creds, error: credError } = await supabase
+    const { data: credsData, error: credError } = await supabase
       .from("user_credentials")
       .select("email, updated_at")
       .eq("user_id", userId)
       .eq("service", "piazza")
-      .single();
+      .limit(1);
+    
+    const creds = Array.isArray(credsData) ? credsData[0] : credsData;
     
     // Also try to get cookie to see if actually authenticated
     let cookieHeader: string | null = null;
@@ -629,13 +713,14 @@ router.get("/piazza/status", async (req: Request, res: Response) => {
     const connected = !credError && !!creds && !!creds.email;
 
     // Get last sync time from piazza_posts table
-    const { data: lastPost } = await supabase
+    const { data: lastPostData } = await supabase
       .from("piazza_posts")
       .select("updated_at")
       .eq("user_id", req.userId!)
       .order("updated_at", { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
+    
+    const lastPost = Array.isArray(lastPostData) ? lastPostData[0] : lastPostData;
 
     // Get classes count
     const { data: classes, count } = await supabase

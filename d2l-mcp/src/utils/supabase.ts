@@ -202,22 +202,20 @@ if (supabaseUrl.startsWith('postgresql://')) {
           const params: any[] = [];
           let paramIndex = 1;
           
-          return {
+          const builder: any = {
             eq: (col: string, val: any) => {
-              deleteQuery += ` WHERE ${col} = $${paramIndex}`;
+              if (params.length === 0) deleteQuery += ` WHERE ${col} = $${paramIndex}`;
+              else deleteQuery += ` AND ${col} = $${paramIndex}`;
               params.push(val);
-              return {
-                then: async (resolve: any) => {
-                  const result = await pool.query(`${deleteQuery} RETURNING *`, params);
-                  resolve({ data: result.rows, error: null });
-                }
-              };
+              paramIndex++;
+              return builder;
             },
             then: async (resolve: any) => {
               const result = await pool.query(`${deleteQuery} RETURNING *`, params);
               resolve({ data: result.rows, error: null });
             }
           };
+          return builder;
         }
       };
     },

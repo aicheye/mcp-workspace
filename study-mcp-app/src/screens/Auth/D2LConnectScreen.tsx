@@ -6,71 +6,24 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  ActivityIndicator,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { AntDesign } from '@expo/vector-icons';
-import { d2lService } from '../../services/d2l';
 
 export default function D2LConnectScreen() {
-  const [host, setHost] = useState('learn.ul.ie');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const navigation = useNavigation();
+  const [host, setHost] = useState('learn.uwaterloo.ca');
+  const navigation = useNavigation<any>();
 
-  const [statusMessage, setStatusMessage] = useState<string>('');
-
-  const handleConnect = async () => {
-    if (!host || !username || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+  const handleConnect = () => {
+    if (!host) {
+      Alert.alert('Error', 'Please enter your D2L host');
       return;
     }
 
-    setLoading(true);
-    setStatusMessage('Storing credentials...');
-    try {
-      setStatusMessage('Verifying credentials with D2L...\nThis may take 30-60 seconds...');
-      await d2lService.connect({ host, username, password });
-      setStatusMessage('');
-      Alert.alert(
-        'Success',
-        'D2L connected and verified successfully! You can now sync your courses and announcements.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Small delay to ensure backend has processed
-              setTimeout(() => {
-                navigation.goBack();
-              }, 300);
-            },
-          },
-        ]
-      );
-    } catch (error: any) {
-      setStatusMessage('');
-      const errorMsg = error.message || 'Failed to connect to D2L';
-      if (errorMsg.includes('Invalid') || errorMsg.includes('credentials')) {
-        Alert.alert(
-          'Authentication Failed',
-          'The username or password you entered is incorrect. Please check your credentials and try again.',
-          [{ text: 'OK' }]
-        );
-      } else if (errorMsg.includes('timeout') || errorMsg.includes('ECONNRESET')) {
-        Alert.alert(
-          'Connection Timeout',
-          'The authentication process took too long. This might be due to network issues or D2L being slow. Please try again.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert('Connection Failed', errorMsg);
-      }
-    } finally {
-      setLoading(false);
-    }
+    // Navigate to WebView login screen
+    navigation.navigate('D2LWebView', { host });
   };
 
   return (
@@ -88,7 +41,7 @@ export default function D2LConnectScreen() {
             <Text style={styles.label}>D2L Host</Text>
             <TextInput
               style={styles.input}
-              placeholder="e.g., learn.ul.ie"
+              placeholder="e.g., learn.uwaterloo.ca"
               value={host}
               onChangeText={setHost}
               autoCapitalize="none"
@@ -97,63 +50,22 @@ export default function D2LConnectScreen() {
             <Text style={styles.helpText}>Your institution's D2L Brightspace URL</Text>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Username</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Your D2L username or email"
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Your D2L password"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoCapitalize="none"
-            />
-          </View>
-
-          {statusMessage ? (
-            <View style={styles.statusContainer}>
-              <ActivityIndicator size="small" color="#6366f1" style={{ marginRight: 8 }} />
-              <Text style={styles.statusText}>{statusMessage}</Text>
-            </View>
-          ) : null}
-
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleConnect}
-            disabled={loading}
-          >
-            {loading ? (
-              <>
-                <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.buttonText}>Connecting...</Text>
-              </>
-            ) : (
-              <>
-                <AntDesign name="link" size={18} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.buttonText}>Connect</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
           <View style={styles.infoBox}>
-            <Text style={styles.infoTitle}>🔒 Security</Text>
+            <Text style={styles.infoTitle}>🔐 Secure Login</Text>
             <Text style={styles.infoText}>
-              Your credentials are securely stored and only used to authenticate with D2L. 
-              They are encrypted and never shared.
+              You'll be redirected to sign in to D2L in a secure browser. 
+              Your login credentials are never stored - only an authentication token.
             </Text>
           </View>
+
+          <TouchableOpacity
+            style={styles.button}
+            onPress={handleConnect}
+          >
+            <AntDesign name="link" size={18} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.buttonText}>Continue to Login</Text>
+          </TouchableOpacity>
+
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -255,22 +167,6 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: 14,
     color: '#64748b',
-    lineHeight: 20,
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#eef2ff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#c7d2fe',
-  },
-  statusText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#4338ca',
     lineHeight: 20,
   },
 });
