@@ -166,32 +166,77 @@ export async function ingestPdfBuffer(
 	buffer: Buffer,
 	opts: IngestPdfOptions
 ): Promise<{ chunkCount: number; pageCount: number }> {
+	if (!userId || typeof userId !== 'string') {
+		throw new Error("userId is required and must be a string");
+	}
+	if (!buffer || !Buffer.isBuffer(buffer)) {
+		throw new Error("buffer is required and must be a Buffer");
+	}
+	if (!opts.noteId) {
+		throw new Error("noteId is required in opts");
+	}
+	
 	const { courseId = "default", title = "Untitled PDF", noteId, url = "" } = opts;
+	console.error(`[INGEST] Starting PDF parse for noteId: ${noteId}, title: ${title}, buffer size: ${buffer.length}`);
+	
 	const { text, pageCount } = await parsePdfBuffer(buffer, "INGEST");
+	console.error(`[INGEST] PDF parsed: ${text.length} chars, ${pageCount} pages`);
+	
 	const chunks = chunkText(text);
+	console.error(`[INGEST] Text chunked into ${chunks.length} chunks`);
+	
 	const slug = slugifyPdfName(title);
 	const rows: Array<Record<string, unknown>> = [];
 	chunks.forEach((chunk, idx) => {
+		const anchor = `${noteId}-${slug}-chunk-${idx + 1}`;
+		if (!anchor || anchor.length === 0) {
+			throw new Error(`Invalid anchor generated for chunk ${idx + 1}`);
+		}
+		// Ensure note_id is a valid UUID string (not undefined/null)
+		if (!noteId || typeof noteId !== 'string') {
+			throw new Error(`Invalid noteId: ${noteId}. Must be a valid UUID string.`);
+		}
 		rows.push({
 			user_id: userId,
-			note_id: noteId,
+			note_id: noteId, // UUID from notes table
 			course_id: courseId,
 			title: `${title} — Chunk ${idx + 1}`,
-			anchor: `${noteId}-${slug}-chunk-${idx + 1}`,
-			url,
-			preview: chunk.slice(0, PREVIEW_LENGTH),
-			content: chunk,
+			anchor: anchor,
+			url: url || `s3://${process.env.S3_BUCKET || 'unknown'}/${opts.url || ''}`,
+			preview: chunk.slice(0, PREVIEW_LENGTH) || '',
+			content: chunk || '',
 		});
 	});
-	if (rows.length === 0) return { chunkCount: 0, pageCount };
+	
+	if (rows.length === 0) {
+		console.error("[INGEST] No chunks generated from PDF");
+		return { chunkCount: 0, pageCount };
+	}
+	console.error(`[INGEST] Prepared ${rows.length} rows for database insert`);
 
 	for (let i = 0; i < rows.length; i += INSERT_BATCH_SIZE) {
 		const batch = rows.slice(i, i + INSERT_BATCH_SIZE);
-		const { error } = await supabase.from("note_sections").upsert(batch, {
+		console.error(`[INGEST] Inserting batch ${i / INSERT_BATCH_SIZE + 1}, rows: ${batch.length}`);
+		
+		// Validate batch data before insert
+		for (const row of batch) {
+			if (!row.user_id || !row.course_id || !row.anchor || !row.title || !row.url) {
+				throw new Error(`Invalid row data: missing required fields. Row: ${JSON.stringify(row)}`);
+			}
+		}
+		
+		const { error, data } = await supabase.from("note_sections").upsert(batch, {
 			onConflict: "user_id,course_id,anchor",
 			ignoreDuplicates: false,
 		});
-		if (error) throw new Error(`ingest upsert failed: ${error.message}`);
+		
+		if (error) {
+			console.error(`[INGEST] Supabase error:`, error);
+			console.error(`[INGEST] Error details:`, JSON.stringify(error, null, 2));
+			console.error(`[INGEST] Batch sample:`, JSON.stringify(batch[0], null, 2));
+			throw new Error(`ingest upsert failed: ${error.message}. Code: ${error.code}, Details: ${error.details || 'none'}`);
+		}
+		console.error(`[INGEST] Batch ${i / INSERT_BATCH_SIZE + 1} inserted successfully`);
 	}
 	return { chunkCount: rows.length, pageCount };
 }

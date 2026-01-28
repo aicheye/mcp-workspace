@@ -7,6 +7,7 @@ import {
 } from 'amazon-cognito-identity-js';
 import { userPool, cognitoConfig } from '../config/cognito';
 import { User } from '../types';
+import { apiClient } from '../config/api';
 
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'user_data';
@@ -705,6 +706,15 @@ export class AuthService {
 
   async logout(): Promise<void> {
     try {
+      // Call backend logout endpoint first
+      try {
+        await apiClient.post('/api/auth/logout');
+        console.log('[Auth] Backend logout successful');
+      } catch (error: any) {
+        // Log error but continue with local logout
+        console.error('[Auth] Backend logout error (continuing with local logout):', error);
+      }
+
       // Get current user email to sign out from Cognito
       const user = await this.getUser();
       if (user?.email) {
@@ -715,13 +725,14 @@ export class AuthService {
         cognitoUser.signOut();
       }
 
+      // Clear local storage
       await SecureStore.deleteItemAsync(TOKEN_KEY);
       await SecureStore.deleteItemAsync(USER_KEY);
       this.currentUser = null;
       // Token removal from API client will be handled by the interceptor
     } catch (error) {
       console.error('Error logging out:', error);
-      // Still clear local storage even if Cognito signout fails
+      // Still clear local storage even if logout fails
       try {
         await SecureStore.deleteItemAsync(TOKEN_KEY);
         await SecureStore.deleteItemAsync(USER_KEY);

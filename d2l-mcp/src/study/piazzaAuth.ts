@@ -158,7 +158,7 @@ export async function getPiazzaAuthenticatedContext(userId?: string): Promise<Br
 
     // If we were headless, restart with visible browser for manual login (only if not in production)
     // In production, we cannot handle manual login - throw error
-    const isProduction = process.env.NODE_ENV === "production" || process.env.AWS_EXECUTION_ENV !== undefined || !process.env.DISPLAY;
+    // Use the isProduction variable already declared above (line 96)
     if (isProduction) {
       await context.close();
       throw new Error("Piazza session expired and manual login required, but running in production/AWS where browser login is not possible. Please re-authenticate via mobile app.");
@@ -202,6 +202,8 @@ export async function getPiazzaAuthenticatedContext(userId?: string): Promise<Br
 }
 
 export async function getPiazzaCookieHeader(userId?: string): Promise<string> {
+  const isProduction = process.env.NODE_ENV === "production" || process.env.AWS_EXECUTION_ENV !== undefined || !process.env.DISPLAY;
+  
   // First, try to get cookies from database (WebView login)
   if (userId) {
     try {
@@ -213,15 +215,53 @@ export async function getPiazzaCookieHeader(userId?: string): Promise<string> {
         .single();
       
       if (!error && data?.token) {
-        console.error("[PIAZZA_AUTH] Using stored cookies from database");
-        return data.token; // Cookies stored as token
+        const cookieHeader = data.token;
+        
+        // Validate cookies before returning (check for session_id and test API call)
+        if (cookieHeader.includes("session_id=")) {
+          // Test cookie validity by making a lightweight API call
+          try {
+            const testResponse = await fetch("https://piazza.com/logic/api?method=network.get_my_feed", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "accept": "application/json",
+                "cookie": cookieHeader,
+              },
+              body: JSON.stringify({ method: "network.get_my_feed", params: { limit: 1 } }),
+            });
+
+            const responseText = await testResponse.text();
+            
+            // If we get HTML, cookies are invalid
+            if (responseText.trim().startsWith("<!DOCTYPE html") || responseText.trim().startsWith("<html")) {
+              console.error("[PIAZZA_AUTH] Stored cookies are invalid (got HTML response)");
+              // Don't throw here - fall through to browser auth or error
+            } else if (testResponse.ok) {
+              // Cookies are valid
+              console.error("[PIAZZA_AUTH] Using validated cookies from database");
+              return cookieHeader;
+            } else {
+              console.error("[PIAZZA_AUTH] Cookie validation failed with status:", testResponse.status);
+            }
+          } catch (validationError) {
+            console.error("[PIAZZA_AUTH] Cookie validation error:", validationError);
+            // Fall through to browser auth or error
+          }
+        } else {
+          console.error("[PIAZZA_AUTH] Stored cookies missing session_id");
+        }
       }
     } catch (e) {
-      console.error("[PIAZZA_AUTH] Failed to get cookies from DB, falling back to browser:", e);
+      console.error("[PIAZZA_AUTH] Failed to get cookies from DB:", e);
     }
   }
   
-  // Fallback to browser-based auth (for local dev or if no cookies stored)
+  // Fallback to browser-based auth (ONLY in non-production)
+  if (isProduction) {
+    throw new Error("Piazza authentication required but no valid cookies found. Please re-authenticate via mobile app WebView login.");
+  }
+  
   const context = await getPiazzaAuthenticatedContext(userId);
   try {
     const cookies = await context.cookies(["https://piazza.com"]);

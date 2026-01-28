@@ -245,6 +245,21 @@ export class D2LService {
       throw new Error(error.response?.data?.error || 'Failed to fetch grades');
     }
   }
+
+  /**
+   * Disconnect D2L (remove stored credentials)
+   */
+  async disconnect(): Promise<void> {
+    try {
+      const response = await apiClient.delete('/api/d2l/disconnect');
+      if (response.status !== 200) {
+        throw new Error(response.data?.error || 'Failed to disconnect D2L');
+      }
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to disconnect D2L';
+      throw new Error(errorMessage);
+    }
+  }
 }
 
 export const d2lService = new D2LService();

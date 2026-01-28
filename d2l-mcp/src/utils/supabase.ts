@@ -135,13 +135,27 @@ if (supabaseUrl.startsWith('postgresql://')) {
           const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
           const insertQuery = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`;
           
-          return {
-            select: (cols: string = '*') => ({
+          const selectBuilder = (cols: string = '*') => {
+            const builder: any = {
+              single: () => ({
+                then: async (resolve: any) => {
+                  const result = await pool.query(insertQuery.replace('RETURNING *', `RETURNING ${cols}`), vals);
+                  resolve({ 
+                    data: result.rows.length > 0 ? result.rows[0] : null, 
+                    error: result.rows.length === 0 ? new Error('No rows returned') : null 
+                  });
+                }
+              }),
               then: async (resolve: any) => {
                 const result = await pool.query(insertQuery.replace('RETURNING *', `RETURNING ${cols}`), vals);
                 resolve({ data: result.rows, error: null });
               }
-            }),
+            };
+            return builder;
+          };
+          
+          return {
+            select: selectBuilder,
             then: async (resolve: any) => {
               const result = await pool.query(insertQuery, vals);
               resolve({ data: result.rows, error: null });
@@ -174,28 +188,32 @@ if (supabaseUrl.startsWith('postgresql://')) {
           const params: any[] = [...vals];
           let paramIndex = keys.length + 1;
           
-          return {
+          const builder: any = {
             eq: (col: string, val: any) => {
-              updateQuery += ` WHERE ${col} = $${paramIndex}`;
+              if (params.length === keys.length) {
+                // First WHERE clause
+                updateQuery += ` WHERE ${col} = $${paramIndex}`;
+              } else {
+                // Additional AND clause
+                updateQuery += ` AND ${col} = $${paramIndex}`;
+              }
               params.push(val);
-              return {
-                select: (cols: string = '*') => ({
-                  then: async (resolve: any) => {
-                    const result = await pool.query(`${updateQuery} RETURNING ${cols}`, params);
-                    resolve({ data: result.rows, error: null });
-                  }
-                }),
-                then: async (resolve: any) => {
-                  const result = await pool.query(`${updateQuery} RETURNING *`, params);
-                  resolve({ data: result.rows, error: null });
-                }
-              };
+              paramIndex++;
+              return builder; // Return builder for chaining
             },
+            select: (cols: string = '*') => ({
+              then: async (resolve: any) => {
+                const result = await pool.query(`${updateQuery} RETURNING ${cols}`, params);
+                resolve({ data: result.rows, error: null });
+              }
+            }),
             then: async (resolve: any) => {
               const result = await pool.query(`${updateQuery} RETURNING *`, params);
               resolve({ data: result.rows, error: null });
             }
           };
+          
+          return builder;
         },
         delete: () => {
           let deleteQuery = `DELETE FROM ${table}`;

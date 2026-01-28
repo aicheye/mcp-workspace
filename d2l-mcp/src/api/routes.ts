@@ -61,6 +61,8 @@ router.post("/notes/process", async (req: Request, res: Response) => {
   let noteId: string | null = null;
 
   try {
+    // Step 1: Create note record first (file should already be uploaded to S3 by mobile app)
+    console.error("[API] Creating note record...");
     const { data: note, error: insertErr } = await supabase
       .from("notes")
       .insert({
@@ -73,34 +75,71 @@ router.post("/notes/process", async (req: Request, res: Response) => {
       .select("id")
       .single();
 
-    if (insertErr || !note) {
+    if (insertErr || !note || !note.id) {
       console.error("[API] note insert error:", insertErr);
-      res.status(500).json({ error: "Failed to create note" });
+      console.error("[API] note insert error details:", JSON.stringify(insertErr, null, 2));
+      res.status(500).json({ 
+        error: "Failed to create note",
+        details: insertErr?.message || "Unknown error",
+        code: insertErr?.code
+      });
       return;
     }
     noteId = note.id;
+    console.error("[API] Note created:", note.id);
 
-    const buffer = await getObjectBuffer(s3Key);
+    // Step 2: Fetch PDF from S3 (file should exist since mobile app uploaded it first)
+    console.error("[API] Fetching PDF from S3...");
+    let buffer: Buffer | null = null;
+    let retries = 8; // up to ~8s total wait for S3 consistency / slow uploads
+    while (retries > 0 && !buffer) {
+      buffer = await getObjectBuffer(s3Key);
+      if (!buffer && retries > 1) {
+        console.error(`[API] PDF not found, retrying... (${retries - 1} retries left)`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s between attempts
+        retries--;
+      } else {
+        break;
+      }
+    }
+
     if (!buffer) {
-      await supabase.from("notes").update({ status: "error" }).eq("id", note.id);
-      res.status(404).json({ error: "PDF not found in S3", noteId: note.id });
+      console.error("[API] PDF buffer is null/undefined after retries");
+      // If we never see the file, treat this as a transient timing issue
+      // and clean up the note instead of leaving a permanent 'error' record.
+      try {
+        await supabase
+          .from("notes")
+          .delete()
+          .eq("id", note.id)
+          .eq("user_id", userId);
+      } catch (cleanupErr) {
+        console.error("[API] Failed to delete note after missing PDF:", cleanupErr);
+      }
+      res.status(503).json({ 
+        error: "PDF not yet available in storage", 
+        suggestion: "The upload may not have fully finished. Please wait a few seconds and try again.",
+      });
       return;
     }
 
     if (buffer.length === 0) {
-      await supabase.from("notes").update({ status: "error" }).eq("id", note.id);
+      console.error("[API] PDF buffer is empty");
+      await supabase.from("notes").update({ status: "error" }).eq("id", note.id).eq("user_id", userId);
       res.status(400).json({ error: "PDF file is empty", noteId: note.id });
       return;
     }
+    console.error("[API] PDF buffer retrieved, size:", buffer.length);
 
+    // Step 3: Process PDF (with proper error handling to update status)
     let chunkCount = 0;
     let pageCount = 0;
     try {
-      console.error("[API] Starting PDF ingestion, buffer size:", buffer.length);
+      console.error("[API] Starting PDF ingestion, buffer size:", buffer.length, "noteId:", note.id);
       const ingestResult = await ingestPdfBuffer(userId, buffer, {
         courseId: course,
         title: noteTitle,
-        noteId: note.id,
+        noteId: note.id, // Ensure note.id is passed (UUID)
         url,
       });
       chunkCount = ingestResult.chunkCount;
@@ -111,31 +150,35 @@ router.post("/notes/process", async (req: Request, res: Response) => {
       const errorStack = ingestError instanceof Error ? ingestError.stack : undefined;
       console.error("[API] ingestPdfBuffer error:", errorMsg);
       console.error("[API] ingestPdfBuffer stack:", errorStack);
-      console.error("[API] ingestPdfBuffer full error:", ingestError);
+      console.error("[API] ingestPdfBuffer full error:", JSON.stringify(ingestError, Object.getOwnPropertyNames(ingestError)));
       
-      await supabase.from("notes").update({ status: "error" }).eq("id", note.id);
+      // ALWAYS update status to error on failure (prevents stuck "processing" state)
+      try {
+        await supabase.from("notes").update({ status: "error" }).eq("id", note.id).eq("user_id", userId);
+      } catch (updateErr) {
+        console.error("[API] Failed to update note status to error:", updateErr);
+      }
       
-      // Check if it's a PDF parsing error
-      if (errorMsg.includes("pdf-parse") || errorMsg.includes("PDF") || errorMsg.includes("parse")) {
+      // Check if it's a database error
+      if (errorMsg.includes("ingest upsert failed") || errorMsg.includes("Supabase") || errorMsg.includes("constraint") || errorMsg.includes("foreign key")) {
+        res.status(500).json({ 
+          error: "Database error while saving PDF chunks", 
+          details: errorMsg,
+          noteId: note.id,
+          suggestion: "This may be a database constraint or foreign key issue. Please check backend logs.",
+        });
+      } else if (errorMsg.includes("pdf-parse") || errorMsg.includes("PDF") || errorMsg.includes("parse") || errorMsg.includes("corrupted") || errorMsg.includes("encrypted")) {
         res.status(500).json({ 
           error: "Failed to parse PDF file", 
           details: errorMsg,
           noteId: note.id,
           suggestion: "The PDF file may be corrupted, encrypted, or in an unsupported format. Please try a different PDF file.",
-          debug: {
-            bufferSize: buffer.length,
-            s3Key: s3Key.substring(0, 50),
-          }
         });
       } else {
         res.status(500).json({ 
           error: "Failed to ingest PDF", 
           details: errorMsg,
           noteId: note.id,
-          debug: {
-            bufferSize: buffer.length,
-            s3Key: s3Key.substring(0, 50),
-          }
         });
       }
       return;
@@ -217,6 +260,58 @@ router.get("/notes", async (req: Request, res: Response) => {
   }
 
   res.json({ notes: notes ?? [] });
+});
+
+/** DELETE /api/notes/:id — delete a note and its sections for the current user */
+router.delete("/notes/:id", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const noteId = req.params.id;
+
+  if (!noteId || typeof noteId !== "string") {
+    res.status(400).json({ error: "noteId is required" });
+    return;
+  }
+
+  try {
+    console.error("[API] Deleting note and sections:", { userId, noteId });
+
+    // First delete note_sections for this note/user
+    const { error: sectionsError } = await supabase
+      .from("note_sections")
+      .delete()
+      .eq("user_id", userId)
+      .eq("note_id", noteId);
+
+    if (sectionsError) {
+      console.error("[API] notes delete - note_sections error:", sectionsError);
+      res.status(500).json({ error: "Failed to delete note sections" });
+      return;
+    }
+
+    // Then delete the note itself
+    const { data: deletedNotes, error: notesError } = await supabase
+      .from("notes")
+      .delete()
+      .eq("user_id", userId)
+      .eq("id", noteId)
+      .select("id");
+
+    if (notesError) {
+      console.error("[API] notes delete - notes error:", notesError);
+      res.status(500).json({ error: "Failed to delete note" });
+      return;
+    }
+
+    if (!deletedNotes || deletedNotes.length === 0) {
+      res.status(404).json({ error: "Note not found" });
+      return;
+    }
+
+    res.json({ status: "deleted", noteId });
+  } catch (e) {
+    console.error("[API] notes delete error:", e);
+    res.status(500).json({ error: "Failed to delete note", details: e instanceof Error ? e.message : String(e) });
+  }
 });
 
 /** GET /api/search — query q, courseId?, limit? -> { hits: [...] } */
@@ -698,6 +793,35 @@ router.get("/d2l/status", async (req: Request, res: Response) => {
   }
 });
 
+/** DELETE /api/d2l/disconnect — Remove D2L credentials for current user */
+router.delete("/d2l/disconnect", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const { error } = await supabase
+      .from("user_credentials")
+      .delete()
+      .eq("user_id", userId)
+      .eq("service", "d2l");
+
+    if (error) {
+      console.error("[API] d2l/disconnect error:", error);
+      res.status(500).json({ error: "Failed to disconnect D2L" });
+      return;
+    }
+
+    res.json({
+      status: "disconnected",
+      message: "D2L disconnected successfully",
+    });
+  } catch (e) {
+    console.error("[API] d2l/disconnect error:", e);
+    res.status(500).json({
+      error: "Failed to disconnect D2L",
+      details: e instanceof Error ? e.message : String(e),
+    });
+  }
+});
+
 /** POST /api/d2l/sync — Sync all D2L assignments */
 router.post("/d2l/sync", async (req: Request, res: Response) => {
   const userId = req.userId!;
@@ -722,6 +846,7 @@ router.post("/d2l/sync", async (req: Request, res: Response) => {
   } catch (e: any) {
     console.error("[API] d2l/sync error:", e);
     const errorMessage = e instanceof Error ? e.message : String(e);
+    const lowerMessage = errorMessage.toLowerCase();
     
     // Check if error is REAUTH_REQUIRED
     if (errorMessage === "REAUTH_REQUIRED" || errorMessage.includes("REAUTH_REQUIRED")) {
@@ -734,7 +859,12 @@ router.post("/d2l/sync", async (req: Request, res: Response) => {
     }
     
     // Check if it's an auth error (token issue)
-    if (errorMessage.includes("token") || errorMessage.includes("authentication") || errorMessage.includes("unauthorized")) {
+    if (
+      lowerMessage.includes("token") ||
+      lowerMessage.includes("authentication") || // catches "Authentication required"
+      lowerMessage.includes("unauthorized") ||
+      lowerMessage.includes("403") // treat 403 from D2L as auth issue for sync
+    ) {
       res.status(401).json({
         status: "failed",
         error: "AUTH_REQUIRED",
@@ -1358,6 +1488,27 @@ router.post("/push/sync", async (req: Request, res: Response) => {
   } catch (e) {
     console.error("[API] push/sync error:", e);
     res.status(500).json({ error: "Failed to check updates", details: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** POST /api/auth/logout — Logout user (clear any server-side sessions if needed) */
+router.post("/auth/logout", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    // For JWT-based auth (Cognito), logout is primarily client-side (clear token)
+    // But we can clear any server-side caches or sessions here if needed
+    // For now, just return success - client will clear token
+    console.error(`[API] User ${userId} logged out`);
+    res.json({ 
+      status: "success",
+      message: "Logged out successfully" 
+    });
+  } catch (e) {
+    console.error("[API] auth/logout error:", e);
+    res.status(500).json({ 
+      error: "Failed to logout", 
+      details: e instanceof Error ? e.message : String(e) 
+    });
   }
 });
 

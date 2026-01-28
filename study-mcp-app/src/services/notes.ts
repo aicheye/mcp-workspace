@@ -30,6 +30,15 @@ export class NotesService {
     return response.data.notes || [];
   }
 
+  async deleteNote(noteId: string): Promise<void> {
+    const response = await apiClient.delete<{ status: string; noteId: string }>(
+      `/api/notes/${noteId}`
+    );
+    if (response.status !== 200) {
+      throw new Error(response.data?.status || 'Failed to delete note');
+    }
+  }
+
   async uploadFile(
     uploadUrl: string,
     fileUri: string,

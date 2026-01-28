@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,18 @@ export default function PiazzaWebViewScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const piazzaUrl = 'https://piazza.com/';
+
+  // On mount, clear existing WebView cookies so we always start from a clean Piazza login state
+  useEffect(() => {
+    (async () => {
+      try {
+        console.log('[Piazza WebView] Clearing WebView cookies on mount');
+        await CookieManager.clearAll(true);
+      } catch (error) {
+        console.warn('[Piazza WebView] Failed to clear cookies on mount:', error);
+      }
+    })();
+  }, []);
 
   const handleNavigationStateChange = async (navState: any) => {
     // Check if we've navigated to a Piazza authenticated page (successful login)

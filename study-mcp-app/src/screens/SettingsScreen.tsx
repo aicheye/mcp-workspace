@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { AntDesign } from '@expo/vector-icons';
+import CookieManager from '@react-native-cookies/cookies';
 import { useAuth } from '../context/AuthContext';
 import { d2lService } from '../services/d2l';
 import { piazzaService } from '../services/piazza';
@@ -81,6 +82,29 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleD2LDisconnect = async () => {
+    Alert.alert(
+      'Disconnect D2L',
+      'Are you sure you want to disconnect your D2L Brightspace account?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await d2lService.disconnect();
+              Alert.alert('Success', 'D2L disconnected successfully');
+              await loadIntegrationStatus();
+            } catch (error: any) {
+              Alert.alert('Disconnect Failed', error.message || 'Failed to disconnect D2L');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handlePiazzaConnect = async () => {
     // @ts-ignore - navigation type will be fixed later
     navigation.navigate('PiazzaConnect');
@@ -93,7 +117,24 @@ export default function SettingsScreen() {
       Alert.alert('Success', 'Piazza data synced successfully');
       await loadIntegrationStatus();
     } catch (error: any) {
-      Alert.alert('Sync Failed', error.message || 'Failed to sync Piazza data');
+      const errorMessage = error.message || 'Failed to sync Piazza data';
+      
+      // Check if re-authentication is required
+      if (errorMessage.includes('authentication') || errorMessage.includes('reconnect') || errorMessage.includes('re-authenticate')) {
+        Alert.alert(
+          'Authentication Required',
+          'Your Piazza session has expired. Please reconnect to continue syncing.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Reconnect',
+              onPress: () => handlePiazzaConnect(),
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Sync Failed', errorMessage);
+      }
     } finally {
       setPiazzaStatus((prev) => ({ ...prev, syncing: false }));
     }
@@ -110,6 +151,14 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
+              // Clear Piazza-related WebView cookies so the next login starts from a clean state
+              try {
+                console.log('[Piazza] Clearing WebView cookies before disconnect');
+                await CookieManager.clearAll(true);
+              } catch (cookieError) {
+                console.warn('[Piazza] Failed to clear WebView cookies:', cookieError);
+              }
+
               await piazzaService.disconnect();
               Alert.alert('Success', 'Piazza disconnected successfully');
               await loadIntegrationStatus();
@@ -186,20 +235,29 @@ export default function SettingsScreen() {
                 <Text style={styles.connectButtonText}>Connect</Text>
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity
-                style={[styles.syncButton, d2lStatus.syncing && styles.syncButtonDisabled]}
-                onPress={handleD2LSync}
-                disabled={d2lStatus.syncing}
-              >
-                {d2lStatus.syncing ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <AntDesign name="sync" size={16} color="#fff" style={{ marginRight: 6 }} />
-                    <Text style={styles.syncButtonText}>Sync Now</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity
+                  style={[styles.syncButton, d2lStatus.syncing && styles.syncButtonDisabled, { flex: 1 }]}
+                  onPress={handleD2LSync}
+                  disabled={d2lStatus.syncing}
+                >
+                  {d2lStatus.syncing ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <AntDesign name="sync" size={16} color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.syncButtonText}>Sync Now</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.disconnectButton]}
+                  onPress={handleD2LDisconnect}
+                >
+                  <AntDesign name="logout" size={16} color="#ef4444" style={{ marginRight: 6 }} />
+                  <Text style={styles.disconnectButtonText}>Sign Out</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         </View>

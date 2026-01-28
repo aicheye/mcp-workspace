@@ -125,7 +125,28 @@ export class PiazzaService {
         throw new Error(response.data?.message || response.data?.error || 'Failed to sync Piazza data');
       }
     } catch (error: any) {
+      console.error('[Piazza] Sync error:', error);
+      console.error('[Piazza] Sync error response:', error.response?.data);
+      
       const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || 'Failed to sync Piazza data';
+      const result = error.response?.data?.result;
+      
+      // Check if sync result indicates re-auth is required
+      if (result && typeof result === 'string') {
+        try {
+          const parsed = JSON.parse(result);
+          if (parsed.requiresReauth || errorMessage.includes('authentication') || errorMessage.includes('re-authenticate')) {
+            throw new Error('Piazza authentication expired. Please reconnect via Settings → Piazza → Connect.');
+          }
+        } catch {
+          // Not JSON, continue with original error
+        }
+      }
+      
+      if (errorMessage.includes('authentication') || errorMessage.includes('re-authenticate') || errorMessage.includes('Please re-authenticate')) {
+        throw new Error('Piazza authentication expired. Please reconnect via Settings → Piazza → Connect.');
+      }
+      
       throw new Error(errorMessage);
     }
   }

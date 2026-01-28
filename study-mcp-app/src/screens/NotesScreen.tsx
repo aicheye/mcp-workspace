@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -23,6 +24,30 @@ export default function NotesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation();
+
+  const handleDeleteNote = async (noteId: string) => {
+    Alert.alert(
+      'Delete Note',
+      'Are you sure you want to delete this note? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await notesService.deleteNote(noteId);
+              // Reload notes list after deletion
+              await loadNotes();
+            } catch (error: any) {
+              console.error('Error deleting note:', error);
+              Alert.alert('Delete Failed', error.message || 'Failed to delete note');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const loadNotes = async () => {
     try {
@@ -84,7 +109,11 @@ export default function NotesScreen() {
   }, [searchQuery]);
 
   const renderNote = ({ item }: { item: Note }) => (
-    <TouchableOpacity style={styles.noteCard}>
+    <TouchableOpacity
+      style={styles.noteCard}
+      activeOpacity={0.8}
+      onLongPress={() => handleDeleteNote(item.id)}
+    >
       <Text style={styles.noteTitle}>{item.title}</Text>
       {item.courseId && (
         <Text style={styles.noteCourse}>{item.courseId}</Text>

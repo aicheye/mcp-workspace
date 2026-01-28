@@ -182,7 +182,26 @@ export const PiazzaTools = {
           return JSON.stringify({ success: false, error: `Course ${courseId} not found in piazza_map.json` }, null, 2);
         }
 
-        const cookieHeader = await getPiazzaCookieHeader(userId);
+        // Get and validate cookies before proceeding
+        let cookieHeader: string;
+        try {
+          cookieHeader = await getPiazzaCookieHeader(userId);
+          // Additional validation: ensure session_id exists
+          if (!cookieHeader || !cookieHeader.includes("session_id=")) {
+            return JSON.stringify({ 
+              success: false, 
+              error: "Piazza authentication required. Please re-authenticate via mobile app WebView login.",
+              requiresReauth: true
+            }, null, 2);
+          }
+        } catch (authError) {
+          const authErrorMsg = authError instanceof Error ? authError.message : String(authError);
+          return JSON.stringify({ 
+            success: false, 
+            error: `Piazza authentication failed: ${authErrorMsg}`,
+            requiresReauth: true
+          }, null, 2);
+        }
         const cutoffMs = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
 
         let totalFetched = 0;
