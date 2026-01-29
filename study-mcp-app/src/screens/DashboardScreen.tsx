@@ -15,6 +15,7 @@ import { AntDesign } from '@expo/vector-icons';
 import { dashboardService } from '../services/dashboard';
 import { DashboardResponse, Note } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../supabaseClient';
 
 export default function DashboardScreen() {
   const navigation = useNavigation();
@@ -22,6 +23,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { logout, user } = useAuth();
+  const [displayName, setDisplayName] = useState('User');
 
   const loadDashboard = async () => {
     try {
@@ -69,6 +71,17 @@ export default function DashboardScreen() {
     loadDashboard();
   };
 
+  useEffect(() => {
+    const fetchUser = async () => {
+      const user = await supabase.auth.getUser();
+      if (user.data.user) {
+        setDisplayName(user.data.user.user_metadata?.name || user.data.user.email);
+      }
+    };
+
+    fetchUser();
+  }, []);
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -89,27 +102,7 @@ export default function DashboardScreen() {
         <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Welcome back</Text>
-          <Text style={styles.userName}>
-            {(() => {
-              // Check if name exists and is not a UUID
-              const isUUID = (str: string | undefined): boolean => {
-                if (!str) return false;
-                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                return uuidRegex.test(str);
-              };
-              
-              if (user?.name && !isUUID(user.name)) {
-                return user.name;
-              }
-              
-              // Fall back to formatted email
-              if (user?.email) {
-                return user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-              }
-              
-              return 'User';
-            })()}
-          </Text>
+          <Text style={styles.userName}>{displayName}</Text>
         </View>
         <TouchableOpacity onPress={logout} style={styles.logoutButton}>
           <AntDesign name="poweroff" size={16} color="#6366f1" style={{ marginRight: 6 }} />

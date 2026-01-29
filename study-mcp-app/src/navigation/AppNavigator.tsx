@@ -1,5 +1,4 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -107,82 +106,60 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {isAuthenticated ? (
-          <>
-            <Stack.Screen name="MainTabs" component={MainTabs} />
-            <Stack.Screen
-              name="Upload"
-              component={UploadScreen}
-              options={{
-                presentation: 'modal',
-                headerShown: true,
-                title: 'Upload Note',
-              }}
-            />
-            <Stack.Screen
-              name="D2LConnect"
-              component={D2LConnectScreen}
-              options={{
-                headerShown: true,
-                title: 'Connect D2L',
-              }}
-            />
-            <Stack.Screen
-              name="D2LWebView"
-              component={D2LWebViewScreen}
-              options={{
-                headerShown: false,
-              }}
-            />
-            <Stack.Screen
-              name="PiazzaConnect"
-              component={PiazzaConnectScreen}
-              options={{
-                headerShown: true,
-                title: 'Connect Piazza',
-              }}
-            />
-            <Stack.Screen
-              name="PiazzaWebView"
-              component={PiazzaWebViewScreen}
-              options={{
-                headerShown: false,
-              }}
-            />
-            <Stack.Screen
-              name="Courses"
-              component={CoursesScreen}
-              options={{
-                headerShown: true,
-                title: 'My Courses',
-              }}
-            />
-            <Stack.Screen
-              name="CourseDetail"
-              component={CourseDetailScreen}
-              options={{
-                headerShown: true,
-                title: 'Course Details',
-              }}
-            />
-          </>
-        ) : (
-          <>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="SignUp" component={SignUpScreen} />
-            <Stack.Screen
-              name="VerifyEmail"
-              component={VerifyEmailScreen}
-              options={{
-                headerShown: true,
-                title: 'Verify Email',
-              }}
-            />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {isAuthenticated ? (
+        <>
+          <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen
+            name="Upload"
+            component={UploadScreen}
+            options={{
+              presentation: 'modal',
+              headerShown: true,
+              title: 'Upload Note',
+            }}
+          />
+          <Stack.Screen
+            name="D2LConnect"
+            component={D2LConnectScreen}
+            options={{
+              headerShown: true,
+              title: 'Connect D2L',
+            }}
+          />
+          <Stack.Screen
+            name="D2LWebView"
+            component={D2LWebViewScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="PiazzaConnect"
+            component={PiazzaConnectScreen}
+            options={{
+              headerShown: true,
+              title: 'Connect Piazza',
+            }}
+          />
+          <Stack.Screen
+            name="PiazzaWebView"
+            component={PiazzaWebViewScreen}
+            options={{ headerShown: false }}
+          />
+        </>
+      ) : (
+        <>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="SignUp" component={SignUpScreen} />
+          <Stack.Screen
+            name="VerifyEmail"
+            component={VerifyEmailScreen}
+            options={{
+              headerShown: true,
+              title: 'Verify Email',
+            }}
+          />
+        </>
+      )}
+    </Stack.Navigator>
   );
 }
