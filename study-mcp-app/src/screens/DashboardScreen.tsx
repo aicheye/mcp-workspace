@@ -34,7 +34,7 @@ export default function DashboardScreen() {
   const [upcoming, setUpcoming] = useState<UpcomingAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { logout, user } = useAuth();
+  const { user } = useAuth();
 
   const loadUpcoming = async () => {
     try {
@@ -326,19 +326,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
     textTransform: 'capitalize',
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: colors.light,
-  },
-  logoutText: {
-    color: colors.accent,
-    fontSize: 14,
-    fontWeight: '600',
   },
   statsContainer: {
     flexDirection: 'row',
