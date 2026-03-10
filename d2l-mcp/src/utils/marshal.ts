@@ -167,6 +167,7 @@ export interface RawCalendarEvent {
 export interface MarshalledDueDate {
   title: string;
   dueDate: string | null;
+  dueDateIso: string | null;
   dueDateRelative: string | null;
   course: string;
   type: string | null;
@@ -223,6 +224,7 @@ export function marshalCalendarEvents(response: { Objects: RawCalendarEvent[] })
     return removeEmpty({
       title: event.title,
       dueDate: formatDate(event.datetime),
+      dueDateIso: event.datetime || null,
       dueDateRelative: formatRelativeDate(event.datetime),
       course: event.courseName,
       type,
@@ -295,6 +297,7 @@ export interface MarshalledAssignment {
   id: number;
   name: string;
   dueDate: string | null;
+  dueDateIso: string | null;
   dueDateRelative: string | null;
   points: number;
   instructions: string | null;
@@ -318,6 +321,7 @@ export function marshalAssignment(a: RawAssignment): MarshalledAssignment {
     id: a.Id,
     name: a.Name,
     dueDate: formatDate(a.DueDate),
+    dueDateIso: a.DueDate || null,         // raw ISO for date math
     dueDateRelative: formatRelativeDate(a.DueDate),
     points: a.Assessment?.ScoreDenominator ?? 0,
     instructions: stripHtml(a.CustomInstructions?.Text || a.CustomInstructions?.Html) || null,

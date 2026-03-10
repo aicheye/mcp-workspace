@@ -537,12 +537,13 @@ const styles = StyleSheet.create({
     borderBottomColor: '#6366f1',
   },
   tabText: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '500',
     color: '#94a3b8',
   },
   activeTabText: {
     color: '#6366f1',
+    fontWeight: '600',
   },
   content: {
     flex: 1,
@@ -600,13 +601,17 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   announcementHeader: {
-    marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
   },
   announcementTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#1e293b',
-    marginBottom: 8,
+    flex: 1,
+    marginRight: 8,
   },
   announcementDate: {
     fontSize: 12,

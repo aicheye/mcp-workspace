@@ -47,15 +47,17 @@ export default function DashboardScreen() {
           try {
             const assignments = await d2lService.getAssignments(course.id);
             for (const a of assignments) {
-              if (a.dueDate) {
-                const due = new Date(a.dueDate);
-                if (due >= now && due <= cutoff) {
+              // Use dueDateIso (raw ISO) for reliable date comparison
+              const rawDate = a.dueDateIso || a.dueDate;
+              if (rawDate) {
+                const due = new Date(rawDate);
+                if (!isNaN(due.getTime()) && due >= now && due <= cutoff) {
                   allAssignments.push({
                     courseId: course.id,
                     courseName: course.name,
                     courseCode: course.code,
                     name: a.name || a.title || 'Assignment',
-                    dueDate: a.dueDate,
+                    dueDate: rawDate,
                   });
                 }
               }
@@ -178,7 +180,7 @@ export default function DashboardScreen() {
           </View>
           <View style={[styles.statCard, styles.statCardSecondary]}>
             <View style={styles.statIconContainer}>
-              <AntDesign name="file-text" size={24} color={colors.secondary} />
+              <AntDesign name="filetext1" size={24} color={colors.secondary} />
             </View>
             <Text style={styles.statValue}>{dashboard?.usage?.totalChunks || 0}</Text>
             <Text style={styles.statLabel}>Chunks</Text>
@@ -219,8 +221,7 @@ export default function DashboardScreen() {
                     <Text style={styles.dueDateMonth}>
                       {new Date(item.dueDate).toLocaleDateString('en-US', { month: 'short' })}
                     </Text>
-                  </View>
-                </View>
+                  </View>                </View>
                 <View style={styles.upcomingContent}>
                   <Text style={styles.upcomingName} numberOfLines={1}>{item.name}</Text>
                   <View style={styles.courseBadge}>
@@ -245,7 +246,7 @@ export default function DashboardScreen() {
               <TouchableOpacity key={note.id} style={styles.noteCard} activeOpacity={0.7}>
                 <View style={styles.noteCardHeader}>
                   <View style={styles.noteIcon}>
-                    <AntDesign name="file-text" size={20} color={colors.accent} />
+                    <AntDesign name="filetext1" size={20} color={colors.accent} />
                   </View>
                   <View style={styles.noteContent}>
                     <Text style={styles.noteTitle} numberOfLines={1}>{note.title}</Text>

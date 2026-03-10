@@ -12,7 +12,6 @@ import { useNavigation } from '@react-navigation/native';
 import { AntDesign } from '@expo/vector-icons';
 import { d2lService } from '../services/d2l';
 import { colors } from '../theme';
-
 interface Course {
     id: string;
     name: string;
@@ -118,7 +117,7 @@ export default function CoursesScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f8fafc',
+        backgroundColor: colors.background,
     },
     centerContainer: {
         flex: 1,
@@ -129,7 +128,7 @@ const styles = StyleSheet.create({
     loadingText: {
         marginTop: 12,
         fontSize: 16,
-        color: '#64748b',
+        color: colors.muted,
     },
     listContent: {
         padding: 16,
@@ -138,18 +137,18 @@ const styles = StyleSheet.create({
     courseCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#ffffff',
+        backgroundColor: colors.card,
         borderRadius: 12,
         padding: 16,
         marginBottom: 12,
         borderWidth: 1,
-        borderColor: '#e2e8f0',
+        borderColor: colors.border,
     },
     courseIcon: {
         width: 48,
         height: 48,
         borderRadius: 24,
-        backgroundColor: '#eef2ff',
+        backgroundColor: colors.light,
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12,
@@ -160,12 +159,12 @@ const styles = StyleSheet.create({
     courseName: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#1e293b',
+        color: colors.text,
         marginBottom: 4,
     },
     courseCode: {
         fontSize: 14,
-        color: '#64748b',
+        color: colors.muted,
     },
     emptyContainer: {
         flex: 1,
@@ -193,24 +192,24 @@ const styles = StyleSheet.create({
     emptyHeader: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#1e293b',
+        color: colors.text,
         marginTop: 16,
     },
     emptySubtext: {
         fontSize: 14,
-        color: '#64748b',
+        color: colors.muted,
         textAlign: 'center',
         marginTop: 8,
         marginBottom: 24,
     },
     connectButton: {
-        backgroundColor: '#6366f1',
+        backgroundColor: colors.accent,
         paddingVertical: 12,
         paddingHorizontal: 24,
         borderRadius: 8,
     },
     connectButtonText: {
-        color: '#ffffff',
+        color: colors.card,
         fontWeight: '600',
         fontSize: 16,
     },
