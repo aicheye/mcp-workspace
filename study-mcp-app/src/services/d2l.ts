@@ -12,8 +12,8 @@ export class D2LService {
    */
   private async checkBackendHealth(): Promise<boolean> {
     try {
-      await apiClient.get('/study-logic/health', { timeout: 5000 });
-      return true;
+      const response = await fetch('https://api.hamzaammar.ca/health');
+      return response.ok;
     } catch (error) {
       console.error('[D2L] Backend health check failed:', error);
       return false;
@@ -50,8 +50,7 @@ export class D2LService {
 
       const isHealthy = await this.checkBackendHealth();
       if (!isHealthy) {
-        throw new Error('Cannot reach backend server. Please make sure the backend is running on ' +
-          process.env.EXPO_PUBLIC_SUPABASE_URL);
+        throw new Error('Cannot reach backend server. Please check your internet connection.');
       }
 
       await apiClient.post('/d2l/token', credentials);
@@ -81,8 +80,7 @@ export class D2LService {
 
       const isHealthy = await this.checkBackendHealth();
       if (!isHealthy) {
-        throw new Error('Cannot reach backend server. Please make sure the backend is running on ' +
-          process.env.EXPO_PUBLIC_SUPABASE_URL);
+        throw new Error('Cannot reach backend server. Please check your internet connection.');
       }
 
       await apiClient.post('/d2l/connect-cookie', payload);

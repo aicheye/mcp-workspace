@@ -13,8 +13,8 @@ export class PiazzaService {
    */
   private async checkBackendHealth(): Promise<boolean> {
     try {
-      await apiClient.get('/health', { timeout: 5000 });
-      return true;
+      const response = await fetch('https://api.hamzaammar.ca/health');
+      return response.ok;
     } catch (error) {
       console.error('[Piazza] Backend health check failed:', error);
       return false;
