@@ -9,31 +9,31 @@ import {
 
 export class NotesService {
   async presignUpload(data: PresignUploadRequest): Promise<PresignUploadResponse> {
-    const response = await apiClient.post<PresignUploadResponse>(
+    const response = (await apiClient.post(
       '/notes/presign-upload',
       data
-    );
+    )) as { data: PresignUploadResponse };
     return response.data;
   }
 
   async processNote(data: ProcessNoteRequest): Promise<ProcessNoteResponse> {
-    const response = await apiClient.post<ProcessNoteResponse>(
+    const response = (await apiClient.post(
       '/notes/process',
       data
-    );
+    )) as { data: ProcessNoteResponse };
     return response.data;
   }
 
   async getNotes(courseId?: string): Promise<Note[]> {
     const params = courseId ? { courseId } : {};
-    const response = await apiClient.get<{ notes: Note[] }>('/notes', { params });
-    return response.data.notes || [];
+    const response = (await apiClient.get('/notes', { params })) as {
+      data: { notes: Note[] };
+    };
+    return response.data?.notes ?? [];
   }
 
   async deleteNote(noteId: string): Promise<void> {
-    await apiClient.delete<{ status: string; noteId: string }>(
-      `/notes/${noteId}`
-    );
+    await apiClient.delete(`/notes/${noteId}`);
   }
 
   async uploadFile(
@@ -59,9 +59,9 @@ export class NotesService {
    * Triggers embedding generation for notes that haven't been embedded yet
    */
   async embedMissing(): Promise<{ status: string; message: string }> {
-    const response = await apiClient.post<{ status: string; message: string }>(
-      '/notes/embed-missing'
-    );
+    const response = (await apiClient.post('/notes/embed-missing')) as {
+      data: { status: string; message: string };
+    };
     return response.data;
   }
 
@@ -69,12 +69,14 @@ export class NotesService {
    * Search notes using semantic search
    */
   async searchNotes(query: string, courseId?: string): Promise<any[]> {
-    const params: any = { q: query };
+    const params: Record<string, string> = { q: query };
     if (courseId) {
       params.courseId = courseId;
     }
-    const response = await apiClient.get<{ hits: any[] }>('/search', { params });
-    return response.data.hits || [];
+    const response = (await apiClient.get('/search', { params })) as {
+      data: { hits: any[] };
+    };
+    return response.data?.hits ?? [];
   }
 }
 
