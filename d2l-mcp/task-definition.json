@@ -74,6 +74,10 @@
         {
           "name": "D2L_TOKEN",
           "valueFrom": "arn:aws:secretsmanager:us-east-1:051140201449:secret:study-mcp/d2l-token-aYbbVr"
+        },
+        {
+          "name": "SUPABASE_JWT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:051140201449:secret:study-mcp/supabase-jwt-secret-kXQTMN"
         }
       ],
       "logConfiguration": {
