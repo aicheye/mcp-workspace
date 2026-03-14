@@ -13,6 +13,7 @@ echo "🚀 Building and deploying backend to ECS..."
 # Step 1: Build TypeScript
 echo "📦 Building TypeScript..."
 cd "$(dirname "$0")/.."
+npm install
 npm run build
 
 # Step 2: Login to ECR
