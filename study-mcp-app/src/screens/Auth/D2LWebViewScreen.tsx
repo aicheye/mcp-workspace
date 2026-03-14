@@ -15,36 +15,44 @@ import { apiClient } from '../../config/api';
 
 const D2L_API_VERSION = '1.57';
 
-/** JS injected into the WebView to fetch D2L API from same origin (avoids CORS/cookie issues) */
 const buildFetchScript = (host: string) => `
 (async function() {
   try {
-    // Fetch enrollments
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'status', message: 'Fetching courses...' }));
+
     const enrollRes = await fetch('https://${host}/d2l/api/lp/1.43/enrollments/myenrollments/', {
       credentials: 'include',
       headers: { 'Accept': 'application/json' }
     });
+
     if (!enrollRes.ok) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'Enrollments fetch failed: ' + enrollRes.status }));
+      window.ReactNativeWebView.postMessage(JSON.stringify({ 
+        type: 'error', 
+        message: 'Enrollments API returned ' + enrollRes.status + '. Try logging out and back in to D2L.'
+      }));
       return;
     }
+
     const enrollData = await enrollRes.json();
     const activeCourses = (enrollData.Items || []).filter(e =>
-      e.OrgUnit?.Type?.Code === 'Course Offering' &&
-      e.Access?.IsActive &&
-      e.Access?.CanAccess
+      e.OrgUnit && e.OrgUnit.Type && e.OrgUnit.Type.Code === 'Course Offering' &&
+      e.Access && e.Access.IsActive && e.Access.CanAccess
     );
 
-    // Fetch assignments for each course
+    window.ReactNativeWebView.postMessage(JSON.stringify({ 
+      type: 'status', 
+      message: 'Syncing ' + activeCourses.length + ' courses...' 
+    }));
+
     const courseData = [];
     for (const enrollment of activeCourses) {
       const orgUnitId = enrollment.OrgUnit.Id;
       const courseName = enrollment.OrgUnit.Name;
       try {
-        const foldersRes = await fetch('https://${host}/d2l/api/le/${D2L_API_VERSION}/' + orgUnitId + '/dropbox/folders/', {
-          credentials: 'include',
-          headers: { 'Accept': 'application/json' }
-        });
+        const foldersRes = await fetch(
+          'https://${host}/d2l/api/le/${D2L_API_VERSION}/' + orgUnitId + '/dropbox/folders/',
+          { credentials: 'include', headers: { 'Accept': 'application/json' } }
+        );
         let assignments = [];
         if (foldersRes.ok) {
           const data = await foldersRes.json();
@@ -58,7 +66,10 @@ const buildFetchScript = (host: string) => `
 
     window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'courseData', courseData }));
   } catch(e) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: e.message || String(e) }));
+    window.ReactNativeWebView.postMessage(JSON.stringify({ 
+      type: 'error', 
+      message: 'Script error: ' + (e && e.message ? e.message : String(e))
+    }));
   }
 })();
 true;
@@ -72,31 +83,45 @@ export default function D2LWebViewScreen({ route }: any) {
   const [loggedIn, setLoggedIn] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [statusText, setStatusText] = useState('Please log in to D2L');
+  const [canManualConnect, setCanManualConnect] = useState(false);
+  const injectedRef = useRef(false);
 
   const d2lUrl = `https://${host}/d2l/home`;
 
-  const handleNavigationStateChange = async (navState: any) => {
-    if (navState.url.includes('/d2l/home') && !loggedIn && !submitting) {
-      if (__DEV__) console.log('[D2L WebView] At /d2l/home — injecting fetch script');
+  const injectFetchScript = () => {
+    if (injectedRef.current) return;
+    injectedRef.current = true;
+    if (__DEV__) console.log('[D2L WebView] Injecting fetch script...');
+    webViewRef.current?.injectJavaScript(buildFetchScript(host));
+  };
+
+  const handleNavigationStateChange = (navState: any) => {
+    if (__DEV__) console.log('[D2L WebView] Nav:', navState.url, 'loading:', navState.loading);
+    // Only trigger when fully loaded at /d2l/home
+    if (navState.url.includes('/d2l/home') && !navState.loading && !loggedIn && !submitting) {
       setLoggedIn(true);
-      setStatusText('Session captured! Fetching courses...');
-      // Small delay to let page fully load before injecting
-      setTimeout(() => {
-        webViewRef.current?.injectJavaScript(buildFetchScript(host));
-      }, 1000);
+      setCanManualConnect(true);
+      setStatusText('Logged in — fetching your courses...');
+      setTimeout(injectFetchScript, 1500);
     }
   };
 
   const handleMessage = async (event: any) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
+      if (__DEV__) console.log('[D2L WebView] Message:', msg.type, msg.message || '');
+
+      if (msg.type === 'status') {
+        setStatusText(msg.message);
+        return;
+      }
 
       if (msg.type === 'error') {
-        console.error('[D2L WebView] In-page fetch error:', msg.message);
-        Alert.alert('Error', msg.message || 'Failed to fetch D2L data');
+        console.error('[D2L WebView] Script error:', msg.message);
+        Alert.alert('D2L Error', msg.message);
         setSubmitting(false);
-        setStatusText('Please log in to D2L');
-        setLoggedIn(false);
+        injectedRef.current = false;
+        setStatusText('Tap "Connect" to try again');
         return;
       }
 
@@ -107,13 +132,15 @@ export default function D2LWebViewScreen({ route }: any) {
         setSubmitting(true);
         setStatusText('Saving to your account...');
 
-        // Get cookies via CookieManager (imported at top)
+        // Get cookies for future re-syncs
         const cookies = await CookieManager.get(`https://${host}`, true);
         const d2lSessionVal = cookies.d2lSessionVal?.value;
         const d2lSecureSessionVal = cookies.d2lSecureSessionVal?.value;
         const cookieString = d2lSessionVal && d2lSecureSessionVal
           ? `d2lSessionVal=${d2lSessionVal}; d2lSecureSessionVal=${d2lSecureSessionVal}`
           : '';
+
+        if (__DEV__) console.log('[D2L WebView] Cookies captured:', !!cookieString);
 
         await apiClient.post('/d2l/connect-and-sync', {
           host,
@@ -124,9 +151,17 @@ export default function D2LWebViewScreen({ route }: any) {
         if (__DEV__) console.log('[D2L WebView] Connect and sync complete');
         navigation.goBack();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('[D2L WebView] handleMessage error:', e);
+      Alert.alert('Error', e?.message || 'Something went wrong');
+      setSubmitting(false);
     }
+  };
+
+  const handleManualConnect = () => {
+    injectedRef.current = false;
+    setStatusText('Fetching courses...');
+    injectFetchScript();
   };
 
   return (
@@ -171,6 +206,13 @@ export default function D2LWebViewScreen({ route }: any) {
           <Text style={styles.tokenStatusText}>{statusText}</Text>
           {submitting && <ActivityIndicator size="small" color="#6366f1" style={{ marginLeft: 8 }} />}
         </View>
+
+        {canManualConnect && !submitting && (
+          <TouchableOpacity style={styles.connectButton} onPress={handleManualConnect}>
+            <AntDesign name="link" size={18} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.connectButtonText}>Connect</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -196,8 +238,13 @@ const styles = StyleSheet.create({
     padding: 16, borderTopWidth: 1, borderTopColor: '#e2e8f0', backgroundColor: '#fff',
   },
   tokenStatus: {
-    flexDirection: 'row', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', marginBottom: 10,
     padding: 12, backgroundColor: '#f1f5f9', borderRadius: 8,
   },
   tokenStatusText: { flex: 1, marginLeft: 8, fontSize: 14, color: '#475569' },
+  connectButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#6366f1', paddingVertical: 14, paddingHorizontal: 24, borderRadius: 8,
+  },
+  connectButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });
