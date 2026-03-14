@@ -8,6 +8,7 @@ import {
     ActivityIndicator,
     RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { AntDesign } from '@expo/vector-icons';
 import { d2lService } from '../services/d2l';
@@ -76,7 +77,10 @@ export default function CoursesScreen() {
     }
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+            <View style={styles.header}>
+                <Text style={styles.title}>My Courses</Text>
+            </View>
             {error && (
                 <View style={styles.errorBanner}>
                     <Text style={styles.errorText} numberOfLines={1}>{error}</Text>
@@ -102,7 +106,7 @@ export default function CoursesScreen() {
                             <Text style={styles.emptySubtext}>Connect your D2L account to sync your studies</Text>
                             <TouchableOpacity
                                 style={styles.connectButton}
-                                onPress={() => (navigation.navigate as any)('Sync')}
+                                onPress={() => (navigation.navigate as any)('Settings')}
                             >
                                 <Text style={styles.connectButtonText}>Go to Integrations</Text>
                             </TouchableOpacity>
@@ -110,7 +114,7 @@ export default function CoursesScreen() {
                     ) : null
                 }
             />
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -118,6 +122,19 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: colors.background,
+    },
+    header: {
+        paddingHorizontal: 24,
+        paddingTop: 8,
+        paddingBottom: 16,
+        backgroundColor: colors.card,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+    },
+    title: {
+        fontSize: 28,
+        fontWeight: '700',
+        color: colors.text,
     },
     centerContainer: {
         flex: 1,

@@ -18,7 +18,6 @@ import UploadScreen from '../screens/UploadScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import CoursesScreen from '../screens/CoursesScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
-import IntegrationsScreen from '../screens/IntegrationsScreen';
 import { ActivityIndicator, View } from 'react-native';
 
 const Stack = createNativeStackNavigator();
@@ -32,14 +31,7 @@ function MainTabs() {
       screenOptions={{
         tabBarActiveTintColor: '#6366f1',
         tabBarInactiveTintColor: '#94a3b8',
-        headerShown: true,
-        headerStyle: {
-          backgroundColor: '#6366f1',
-        },
-        headerTintColor: '#fff',
-        headerTitleStyle: {
-          fontWeight: 'bold',
-        },
+        headerShown: false,
         tabBarStyle: {
           backgroundColor: '#ffffff',
           borderTopWidth: 1,
@@ -62,55 +54,32 @@ function MainTabs() {
         name="Dashboard"
         component={DashboardScreen}
         options={{
-          headerShown: false,
           tabBarLabel: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <AntDesign name="home" size={22} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <AntDesign name="home" size={22} color={color} />,
+        }}
+      />
+      <Tab.Screen
+        name="Courses"
+        component={CoursesScreen}
+        options={{
+          tabBarLabel: 'Courses',
+          tabBarIcon: ({ color }) => <AntDesign name="book" size={22} color={color} />,
         }}
       />
       <Tab.Screen
         name="Notes"
         component={NotesScreen}
         options={{
-          headerShown: false,
           tabBarLabel: 'Notes',
-          tabBarIcon: ({ color, size }) => (
-            <AntDesign name="book" size={22} color={color} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Search"
-        component={SearchScreen}
-        options={{
-          headerShown: false,
-          tabBarLabel: 'Search',
-          tabBarIcon: ({ color, size }) => (
-            <AntDesign name="search" size={22} color={color} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Integrations"
-        component={IntegrationsScreen}
-        options={{
-          headerShown: true,
-          tabBarLabel: 'Sync',
-          tabBarIcon: ({ color, size }) => (
-            <AntDesign name="sync" size={22} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <AntDesign name="filetext1" size={22} color={color} />,
         }}
       />
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
         options={{
-          headerShown: false,
           tabBarLabel: 'Settings',
-          tabBarIcon: ({ color, size }) => (
-            <AntDesign name="setting" size={22} color={color} />
-          ),
+          tabBarIcon: ({ color }) => <AntDesign name="setting" size={22} color={color} />,
         }}
       />
     </Tab.Navigator>
@@ -134,37 +103,24 @@ export default function AppNavigator() {
         <>
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen
-            name="Courses"
-            component={CoursesScreen}
-            options={{
-              headerShown: true,
-              title: 'My Courses',
-            }}
-          />
-          <Stack.Screen
             name="CourseDetail"
             component={CourseDetailScreen}
-            options={{
-              headerShown: true,
-              title: 'Course',
-            }}
+            options={{ headerShown: true, title: 'Course' }}
+          />
+          <Stack.Screen
+            name="Search"
+            component={SearchScreen}
+            options={{ headerShown: true, title: 'Search' }}
           />
           <Stack.Screen
             name="Upload"
             component={UploadScreen}
-            options={{
-              presentation: 'modal',
-              headerShown: true,
-              title: 'Upload Note',
-            }}
+            options={{ presentation: 'modal', headerShown: true, title: 'Upload Note' }}
           />
           <Stack.Screen
             name="D2LConnect"
             component={D2LConnectScreen}
-            options={{
-              headerShown: true,
-              title: 'Connect D2L',
-            }}
+            options={{ headerShown: true, title: 'Connect D2L' }}
           />
           <Stack.Screen
             name="D2LWebView"
@@ -174,10 +130,7 @@ export default function AppNavigator() {
           <Stack.Screen
             name="PiazzaConnect"
             component={PiazzaConnectScreen}
-            options={{
-              headerShown: true,
-              title: 'Connect Piazza',
-            }}
+            options={{ headerShown: true, title: 'Connect Piazza' }}
           />
           <Stack.Screen
             name="PiazzaWebView"
@@ -192,10 +145,7 @@ export default function AppNavigator() {
           <Stack.Screen
             name="VerifyEmail"
             component={VerifyEmailScreen}
-            options={{
-              headerShown: true,
-              title: 'Verify Email',
-            }}
+            options={{ headerShown: true, title: 'Verify Email' }}
           />
         </>
       )}
