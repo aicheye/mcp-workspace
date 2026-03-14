@@ -855,16 +855,18 @@ router.get("/d2l/status", async (req: Request, res: Response) => {
       reauthRequired = tokenAge > maxAge;
     }
 
-    // Get last sync time from tasks table
-    const { data: lastTaskData } = await supabase
-      .from("tasks")
-      .select("created_at")
-      .eq("user_id", req.userId!)
-      .eq("source", "d2l")
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    const lastTask = Array.isArray(lastTaskData) ? lastTaskData[0] : lastTaskData;
+    // Get last sync time from tasks table (may not exist yet)
+    let lastTask: any = null;
+    try {
+      const { data: lastTaskData } = await supabase
+        .from("tasks")
+        .select("created_at")
+        .eq("user_id", req.userId!)
+        .like("source", "d2l-%")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      lastTask = Array.isArray(lastTaskData) ? lastTaskData[0] : lastTaskData;
+    } catch { /* tasks table may not exist */ }
 
     // Get courses count (optional - don't fail if this doesn't work)
     let coursesCount = 0;
@@ -1039,12 +1041,20 @@ router.get("/d2l/courses", async (req: Request, res: Response) => {
     try {
       const client = new D2LClient(userId, creds.host);
       const enrollments = await client.getMyEnrollments() as { Items: any[] };
+      const now = new Date();
+      const eightMonthsAgo = new Date(now.getTime() - 8 * 30 * 24 * 60 * 60 * 1000);
+
       const liveCourses = enrollments.Items
-        .filter((e: any) =>
-          e.OrgUnit?.Type?.Code === "Course Offering" &&
-          e.Access?.IsActive &&
-          e.Access?.CanAccess
-        )
+        .filter((e: any) => {
+          if (e.OrgUnit?.Type?.Code !== "Course Offering") return false;
+          if (!e.Access?.IsActive || !e.Access?.CanAccess) return false;
+          // Filter to current term: endDate in future OR startDate within last 8 months
+          const startDate = e.Access?.StartDate ? new Date(e.Access.StartDate) : null;
+          const endDate = e.Access?.EndDate ? new Date(e.Access.EndDate) : null;
+          if (endDate && endDate < now) return false; // already ended
+          if (startDate && startDate < eightMonthsAgo) return false; // too old
+          return true;
+        })
         .map((e: any) => ({
           id: String(e.OrgUnit.Id),
           name: e.OrgUnit.Name,

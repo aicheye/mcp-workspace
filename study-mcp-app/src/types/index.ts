@@ -8,11 +8,11 @@ export interface PresignUploadRequest {
 
 export interface PresignUploadResponse {
   uploadUrl: string;
-  path: string; // Changed from s3Key to path for Supabase
+  s3Key: string;
 }
 
 export interface ProcessNoteRequest {
-  storagePath: string;
+  s3Key: string;
   title: string;
   courseId?: string;
 }

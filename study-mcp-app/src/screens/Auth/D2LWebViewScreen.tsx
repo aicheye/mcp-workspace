@@ -121,11 +121,19 @@ export default function D2LWebViewScreen({ route }: any) {
         host, '/d2l/api/lp/1.43/enrollments/myenrollments/', cookieString
       );
 
+      const now = new Date();
+      const eightMonthsAgo = new Date(now.getTime() - 8 * 30 * 24 * 60 * 60 * 1000);
+
       const activeCourses = (enrollmentsResponse.Items || []).filter(
-        (e: any) =>
-          e.OrgUnit?.Type?.Code === 'Course Offering' &&
-          e.Access?.IsActive &&
-          e.Access?.CanAccess
+        (e: any) => {
+          if (e.OrgUnit?.Type?.Code !== 'Course Offering') return false;
+          if (!e.Access?.IsActive || !e.Access?.CanAccess) return false;
+          const startDate = e.Access?.StartDate ? new Date(e.Access.StartDate) : null;
+          const endDate = e.Access?.EndDate ? new Date(e.Access.EndDate) : null;
+          if (endDate && endDate < now) return false;
+          if (startDate && startDate < eightMonthsAgo) return false;
+          return true;
+        }
       );
 
       if (__DEV__) console.log(`[D2L] ${activeCourses.length} active courses`);

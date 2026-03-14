@@ -134,7 +134,7 @@ export default function UploadScreen() {
       // Step 3: Process the note
       setUploadProgress(80);
       const processResponse = await notesService.processNote({
-        storagePath: presignResponse.path,
+        s3Key: presignResponse.s3Key,
         courseId: courseId || undefined,
         title: title || asset.name.replace('.pdf', ''),
       });
