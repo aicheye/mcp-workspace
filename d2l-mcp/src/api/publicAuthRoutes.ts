@@ -15,8 +15,8 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-/** POST /auth/signup */
-router.post("/auth/signup", async (req: Request, res: Response) => {
+/** POST /signup */
+router.post("/signup", async (req: Request, res: Response) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     res.status(400).json({ error: "Email and password required" });
@@ -32,8 +32,8 @@ router.post("/auth/signup", async (req: Request, res: Response) => {
   }
 });
 
-/** POST /auth/signin */
-router.post("/auth/signin", async (req: Request, res: Response) => {
+/** POST /signin */
+router.post("/signin", async (req: Request, res: Response) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     res.status(400).json({ error: "Email and password required" });
