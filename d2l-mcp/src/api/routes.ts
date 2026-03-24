@@ -1303,8 +1303,7 @@ router.get("/d2l/courses/:courseId/file", async (req: Request, res: Response) =>
 
     // Fetch with session cookies
     const { getSessionCookies } = await import("../auth-valence.js");
-    const sessionCookies = await getSessionCookies(userId);
-    const cookieHeader = sessionCookies.map((c: any) => `${c.name}=${c.value}`).join("; ");
+    const cookieHeader = await getSessionCookies(userId);
 
     const fetchResp = await fetch(fullUrl, {
       headers: { Cookie: cookieHeader },
@@ -1370,8 +1369,7 @@ router.post("/d2l/courses/:courseId/file/save", async (req: Request, res: Respon
     const fullUrl = fileUrl.startsWith("http") ? fileUrl : `https://${creds.host}${fileUrl}`;
 
     const { getSessionCookies } = await import("../auth-valence.js");
-    const sessionCookies = await getSessionCookies(userId);
-    const cookieHeader = sessionCookies.map((c: any) => `${c.name}=${c.value}`).join("; ");
+    const cookieHeader = await getSessionCookies(userId);
 
     // Download PDF buffer
     console.error(`[API] Downloading D2L file: ${fullUrl}`);
@@ -1391,8 +1389,9 @@ router.post("/d2l/courses/:courseId/file/save", async (req: Request, res: Respon
     const s3Key = `users/${userId}/notes/${noteId}-${safeTitle.replace(/ /g, "_")}.pdf`;
 
     // Upload to S3
-    const { uploadBuffer } = await import("../study/src/s3.js");
-    await uploadBuffer(buffer, s3Key, "application/pdf");
+    const { PutObjectCommand, S3Client } = await import("@aws-sdk/client-s3");
+    const s3 = new S3Client({ region: process.env.AWS_REGION || "us-east-1" });
+    await s3.send(new PutObjectCommand({ Bucket: getBucket(), Key: s3Key, Body: buffer, ContentType: "application/pdf" }));
     console.error(`[API] Uploaded to S3: ${s3Key}`);
 
     // Create note record
@@ -1417,9 +1416,12 @@ router.post("/d2l/courses/:courseId/file/save", async (req: Request, res: Respon
     // Process PDF
     const { ingestPdfBuffer } = await import("../study/src/notes.js");
     const s3Url = `s3://${getBucket()}/${s3Key}`;
-    const { chunkCount, pageCount } = await ingestPdfBuffer(
-      buffer, userId, note.id, courseId || "default", safeTitle, { url: s3Url }
-    );
+    const { chunkCount, pageCount } = await ingestPdfBuffer(userId, buffer, {
+      noteId: note.id,
+      courseId: courseId || "default",
+      title: safeTitle,
+      url: s3Url,
+    });
 
     await supabase.from("notes").update({ status: "ready", page_count: pageCount }).eq("id", note.id);
 
