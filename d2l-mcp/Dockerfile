@@ -57,7 +57,6 @@ RUN npm ci && npm prune --production
 # Copy built app
 COPY dist ./dist
 COPY scripts ./scripts
-COPY src/public ./dist/public
 
 # Create sessions directory (will be overridden by EFS mount in ECS)
 RUN mkdir -p /sessions
