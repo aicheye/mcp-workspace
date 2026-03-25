@@ -3,360 +3,488 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Horizon MCP — Connect D2L</title>
+  <title>Horizon MCP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg:        #0a0a0f;
+      --surface:   #111118;
+      --border:    rgba(255,255,255,0.07);
+      --border-hi: rgba(255,255,255,0.12);
+      --text:      #f1f5f9;
+      --muted:     #64748b;
+      --subtle:    #1e293b;
+      --accent:    #6366f1;
+      --accent-hi: #818cf8;
+      --accent-glow: rgba(99,102,241,0.25);
+      --success:   #10b981;
+      --warn:      #f59e0b;
+      --danger:    #ef4444;
+      --radius:    12px;
+      --radius-sm: 8px;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-      background: #060608;
-      color: #f1f5f9;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
       display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 24px;
+      -webkit-font-smoothing: antialiased;
     }
 
-    .glow {
+    /* Background gradient */
+    body::before {
+      content: '';
       position: fixed;
-      width: 600px; height: 600px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%);
-      top: -100px; left: 50%;
-      transform: translateX(-50%);
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.08) 0%, transparent 60%);
       pointer-events: none;
     }
 
-    .container {
+    .wrap {
       width: 100%;
-      max-width: 440px;
+      max-width: 400px;
       position: relative;
       z-index: 1;
     }
 
-    /* Logo */
-    .logo-wrap {
+    /* ── Header ───────────────────────────────────────────────────────── */
+    .header {
       text-align: center;
-      margin-bottom: 40px;
+      margin-bottom: 32px;
     }
-    .logo-icon {
+
+    .logo {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 52px; height: 52px;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
-      border-radius: 16px;
-      font-size: 24px;
-      margin-bottom: 14px;
-      box-shadow: 0 0 32px rgba(99,102,241,0.35);
-    }
-    .logo-name {
+      width: 48px; height: 48px;
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      border-radius: 14px;
       font-size: 22px;
+      margin-bottom: 16px;
+      box-shadow: 0 0 0 1px rgba(99,102,241,0.3), 0 8px 24px rgba(99,102,241,0.2);
+    }
+
+    .header h1 {
+      font-size: 20px;
       font-weight: 700;
-      letter-spacing: -0.5px;
-      background: linear-gradient(135deg, #e2e8f0, #94a3b8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .logo-sub {
-      font-size: 13px;
-      color: #64748b;
-      margin-top: 4px;
-    }
-
-    /* Card */
-    .card {
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.07);
-      border-radius: 20px;
-      padding: 32px;
-      backdrop-filter: blur(20px);
-    }
-
-    .card-title {
-      font-size: 17px;
-      font-weight: 600;
+      letter-spacing: -0.4px;
+      color: var(--text);
       margin-bottom: 4px;
     }
-    .card-sub {
-      font-size: 13px;
-      color: #64748b;
-      margin-bottom: 24px;
+
+    .header p {
+      font-size: 13.5px;
+      color: var(--muted);
+      line-height: 1.5;
     }
 
-    /* Tabs */
+    /* ── Card ─────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 28px;
+    }
+
+    .card-head {
+      margin-bottom: 20px;
+    }
+
+    .card-head h2 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+      margin-bottom: 3px;
+    }
+
+    .card-head p {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* ── Tabs ─────────────────────────────────────────────────────────── */
     .tabs {
       display: flex;
+      gap: 2px;
       background: rgba(255,255,255,0.04);
-      border-radius: 10px;
+      border-radius: var(--radius-sm);
       padding: 3px;
       margin-bottom: 24px;
     }
+
     .tab {
       flex: 1;
-      padding: 8px;
-      text-align: center;
+      padding: 7px 12px;
       font-size: 13px;
       font-weight: 500;
-      border-radius: 8px;
-      cursor: pointer;
-      color: #64748b;
-      transition: all 0.15s;
+      font-family: inherit;
       border: none;
-      background: none;
-    }
-    .tab.active {
-      background: rgba(99,102,241,0.2);
-      color: #a5b4fc;
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--muted);
+      background: transparent;
+      transition: background 0.15s, color 0.15s;
     }
 
-    /* Form */
-    .field { margin-bottom: 16px; }
+    .tab.active {
+      background: rgba(99,102,241,0.18);
+      color: var(--accent-hi);
+    }
+
+    /* ── Form ─────────────────────────────────────────────────────────── */
+    .field {
+      margin-bottom: 14px;
+    }
+
     label {
       display: block;
-      font-size: 12px;
-      font-weight: 500;
-      color: #64748b;
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    input {
-      width: 100%;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 10px;
-      padding: 12px 14px;
-      color: #f1f5f9;
-      font-size: 14px;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-    input::placeholder { color: #334155; }
-    input:focus { border-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.05); }
-
-    /* Button */
-    .btn {
-      width: 100%;
-      padding: 13px;
-      border-radius: 10px;
-      font-size: 14px;
+      font-size: 11.5px;
       font-weight: 600;
-      cursor: pointer;
-      border: none;
-      transition: all 0.15s;
-      margin-top: 4px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 6px;
     }
-    .btn-primary {
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
-      color: white;
-      box-shadow: 0 4px 16px rgba(99,102,241,0.3);
-    }
-    .btn-primary:hover:not(:disabled) {
-      box-shadow: 0 6px 24px rgba(99,102,241,0.45);
-      transform: translateY(-1px);
-    }
-    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-    /* Error / success */
-    .alert {
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 13px;
-      margin-bottom: 16px;
+    input[type="email"],
+    input[type="password"],
+    input[type="text"] {
+      width: 100%;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 13px;
+      font-size: 14px;
+      font-family: inherit;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s, background 0.15s;
+      -webkit-appearance: none;
     }
-    .alert-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); color: #fca5a5; }
-    .alert-success { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: #6ee7b7; }
 
-    /* Steps */
-    .step-list {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      margin-bottom: 20px;
-    }
-    .step-item {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-    }
-    .step-num {
-      width: 24px; height: 24px;
-      border-radius: 50%;
-      background: rgba(99,102,241,0.2);
-      border: 1px solid rgba(99,102,241,0.3);
-      color: #a5b4fc;
-      font-size: 11px;
-      font-weight: 700;
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-      margin-top: 1px;
-    }
-    .step-num.done {
-      background: rgba(16,185,129,0.2);
-      border-color: rgba(16,185,129,0.3);
-      color: #6ee7b7;
-    }
-    .step-num.active {
-      background: rgba(99,102,241,0.3);
-      border-color: rgba(99,102,241,0.6);
-      color: #818cf8;
-      box-shadow: 0 0 10px rgba(99,102,241,0.3);
-    }
-    .step-text h4 { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
-    .step-text p { font-size: 12px; color: #64748b; line-height: 1.5; }
+    input::placeholder { color: #2d3f55; }
 
-    .open-btn {
+    input:focus {
+      border-color: rgba(99,102,241,0.45);
+      background: rgba(99,102,241,0.04);
+    }
+
+    /* ── Buttons ──────────────────────────────────────────────────────── */
+    .btn {
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
       width: 100%;
-      padding: 13px;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      padding: 11px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+    }
+
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1, #7c3aed);
+      color: white;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 4px 16px rgba(99,102,241,0.25);
+    }
+
+    .btn-primary:not(:disabled):hover {
+      box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 6px 20px rgba(99,102,241,0.4);
+      transform: translateY(-1px);
+    }
+
+    .btn-ghost {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn-ghost:not(:disabled):hover {
+      background: rgba(255,255,255,0.08);
+    }
+
+    /* ── Alerts ───────────────────────────────────────────────────────── */
+    .alert {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
+    .alert-error {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.18);
+      color: #fca5a5;
+    }
+
+    .alert-info {
+      background: rgba(99,102,241,0.08);
+      border: 1px solid rgba(99,102,241,0.18);
+      color: #a5b4fc;
+    }
+
+    /* ── Divider ──────────────────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 20px 0;
+    }
+
+    /* ── Footer link ──────────────────────────────────────────────────── */
+    .footer-link {
+      text-align: center;
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .footer-link button {
+      background: none;
+      border: none;
+      color: var(--accent-hi);
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      padding: 0;
+      margin-left: 4px;
+    }
+
+    .footer-link button:hover { text-decoration: underline; }
+
+    /* ── Step list ────────────────────────────────────────────────────── */
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin: 20px 0;
+    }
+
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .step-dot {
+      flex-shrink: 0;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+      border: 1.5px solid rgba(99,102,241,0.3);
+      background: rgba(99,102,241,0.1);
+      color: var(--accent-hi);
+      transition: all 0.2s;
+    }
+
+    .step-dot.done {
+      border-color: rgba(16,185,129,0.4);
+      background: rgba(16,185,129,0.12);
+      color: #34d399;
+    }
+
+    .step-dot.active {
+      border-color: rgba(99,102,241,0.6);
+      background: rgba(99,102,241,0.2);
+      color: var(--accent-hi);
+      box-shadow: 0 0 8px rgba(99,102,241,0.3);
+    }
+
+    .step-body h4 {
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .step-body p {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-top: 1px;
+    }
+
+    /* ── VNC open button ──────────────────────────────────────────────── */
+    .vnc-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 11px 16px;
+      background: linear-gradient(135deg, #6366f1, #7c3aed);
       color: white;
       font-size: 14px;
       font-weight: 600;
-      border-radius: 10px;
+      font-family: inherit;
+      border-radius: var(--radius-sm);
       text-decoration: none;
-      box-shadow: 0 4px 16px rgba(99,102,241,0.3);
-      transition: all 0.15s;
-      margin-bottom: 12px;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 4px 16px rgba(99,102,241,0.25);
+      transition: box-shadow 0.15s, transform 0.15s;
+      margin-bottom: 10px;
     }
-    .open-btn:hover { box-shadow: 0 6px 24px rgba(99,102,241,0.45); transform: translateY(-1px); }
 
-    .waiting-badge {
+    .vnc-btn:hover {
+      box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 6px 20px rgba(99,102,241,0.4);
+      transform: translateY(-1px);
+    }
+
+    /* ── Waiting pill ─────────────────────────────────────────────────── */
+    .waiting {
       display: flex;
       align-items: center;
-      gap: 8px;
-      background: rgba(245,158,11,0.1);
-      border: 1px solid rgba(245,158,11,0.2);
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-size: 12px;
-      color: #fcd34d;
+      gap: 9px;
+      padding: 9px 13px;
+      background: rgba(245,158,11,0.07);
+      border: 1px solid rgba(245,158,11,0.15);
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      color: #fbbf24;
     }
 
-    /* MCP URL box */
-    .mcp-box {
-      background: rgba(99,102,241,0.08);
-      border: 1px solid rgba(99,102,241,0.2);
-      border-radius: 10px;
-      padding: 14px;
-      margin-top: 20px;
+    /* ── Success ──────────────────────────────────────────────────────── */
+    .success-header {
+      text-align: center;
+      padding: 8px 0 20px;
     }
-    .mcp-box-label {
+
+    .success-icon {
+      font-size: 36px;
+      line-height: 1;
+      margin-bottom: 12px;
+    }
+
+    .success-header h2 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      margin-bottom: 4px;
+    }
+
+    .success-header p {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    /* ── MCP URL box ──────────────────────────────────────────────────── */
+    .url-box {
+      background: rgba(99,102,241,0.06);
+      border: 1px solid rgba(99,102,241,0.15);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+
+    .url-box-label {
       font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #64748b;
+      letter-spacing: 0.7px;
+      color: var(--muted);
       margin-bottom: 8px;
     }
-    .mcp-url {
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 12px;
-      color: #a5b4fc;
+
+    .url-value {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 12.5px;
+      color: var(--accent-hi);
       word-break: break-all;
-      margin-bottom: 10px;
+      line-height: 1.5;
+      margin-bottom: 12px;
     }
+
     .copy-btn {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: rgba(99,102,241,0.15);
-      border: 1px solid rgba(99,102,241,0.25);
-      border-radius: 6px;
-      color: #a5b4fc;
-      font-size: 12px;
-      font-weight: 500;
       padding: 6px 12px;
+      background: rgba(99,102,241,0.12);
+      border: 1px solid rgba(99,102,241,0.22);
+      border-radius: 6px;
+      color: var(--accent-hi);
+      font-size: 12.5px;
+      font-weight: 500;
+      font-family: inherit;
       cursor: pointer;
-      transition: all 0.15s;
+      transition: background 0.15s;
     }
-    .copy-btn:hover { background: rgba(99,102,241,0.25); }
+
+    .copy-btn:hover { background: rgba(99,102,241,0.2); }
 
     .poke-hint {
-      font-size: 11px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(99,102,241,0.1);
+      font-size: 12px;
       color: #475569;
-      margin-top: 10px;
-      line-height: 1.6;
+      line-height: 1.7;
     }
+
+    .poke-hint strong { color: #64748b; }
+
     .poke-hint code {
-      background: rgba(255,255,255,0.06);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 11.5px;
+      background: rgba(255,255,255,0.05);
+      color: #94a3b8;
       padding: 1px 5px;
       border-radius: 4px;
-      color: #94a3b8;
-      font-size: 11px;
     }
 
-    .spinner {
+    /* ── Spinner ──────────────────────────────────────────────────────── */
+    .spin {
       display: inline-block;
-      width: 14px; height: 14px;
-      border: 2px solid rgba(255,255,255,0.3);
-      border-top-color: white;
+      width: 13px; height: 13px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: currentColor;
       border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      vertical-align: middle;
-      margin-right: 6px;
+      animation: spin 0.65s linear infinite;
+      flex-shrink: 0;
     }
+
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    .divider {
-      height: 1px;
-      background: rgba(255,255,255,0.06);
-      margin: 20px 0;
-    }
-
-    .success-icon {
-      font-size: 40px;
-      text-align: center;
-      margin-bottom: 12px;
-    }
-    .success-title {
-      font-size: 18px;
-      font-weight: 700;
-      text-align: center;
-      margin-bottom: 4px;
-    }
-    .success-sub {
-      font-size: 13px;
-      color: #64748b;
-      text-align: center;
-      margin-bottom: 20px;
-    }
-
     .hidden { display: none !important; }
-
-    .link-btn {
-      background: none;
-      border: none;
-      color: #6366f1;
-      font-size: 13px;
-      cursor: pointer;
-      text-decoration: underline;
-      padding: 0;
-    }
-    .text-center { text-align: center; margin-top: 16px; }
   </style>
 </head>
 <body>
-  <div class="glow"></div>
-  <div class="container">
+  <div class="wrap">
 
-    <div class="logo-wrap">
-      <div class="logo-icon">⚡</div>
-      <div class="logo-name">Horizon MCP</div>
-      <div class="logo-sub">AI-powered access to your D2L courses</div>
+    <div class="header">
+      <div class="logo">⚡</div>
+      <h1>Horizon MCP</h1>
+      <p>AI-powered access to your D2L courses</p>
     </div>
 
-    <!-- STEP 1: Auth -->
+    <!-- ── Step 1: Auth ─────────────────────────────────────────────── -->
     <div id="stepAuth" class="card">
       <div class="tabs">
-        <button class="tab active" id="tabSignin" onclick="switchTab('signin')">Sign In</button>
-        <button class="tab" id="tabSignup" onclick="switchTab('signup')">Create Account</button>
+        <button class="tab active" id="tabSignin" onclick="switchTab('signin')">Sign in</button>
+        <button class="tab" id="tabSignup" onclick="switchTab('signup')">Create account</button>
       </div>
 
       <div id="alertBox" class="hidden"></div>
@@ -365,97 +493,102 @@
         <label>Email</label>
         <input type="email" id="email" placeholder="you@university.ca" autocomplete="email" />
       </div>
-      <div class="field">
+      <div class="field" style="margin-bottom:20px">
         <label>Password</label>
         <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
       </div>
 
-      <button class="btn btn-primary" id="authBtn" onclick="handleAuth()">
-        Sign In
-      </button>
+      <button class="btn btn-primary" id="authBtn" onclick="handleAuth()">Sign in</button>
 
-      <div class="text-center">
-        <span style="font-size:13px; color:#475569" id="switchText">Don't have an account?</span>
-        <button class="link-btn" id="switchBtn" onclick="switchTab('signup')" style="margin-left:6px">Create one</button>
+      <div class="footer-link">
+        <span id="switchText">Don't have an account?</span>
+        <button id="switchBtn" onclick="switchTab('signup')">Create one</button>
       </div>
     </div>
 
-    <!-- STEP 2: D2L Browser Auth -->
+    <!-- ── Step 2: D2L ──────────────────────────────────────────────── -->
     <div id="stepD2L" class="card hidden">
-      <div class="card-title">Connect D2L</div>
-      <div class="card-sub">Log in to your university portal to complete setup.</div>
+      <div class="card-head">
+        <h2>Connect D2L</h2>
+        <p>Log in to your university portal to complete setup.</p>
+      </div>
 
       <div id="d2lAlertBox" class="hidden"></div>
 
-      <div class="field">
-        <label>University D2L Host</label>
+      <div class="field" style="margin-bottom:20px">
+        <label>University D2L host</label>
         <input type="text" id="d2lHost" value="learn.uwaterloo.ca" />
       </div>
 
-      <button class="btn btn-primary" id="connectBtn" onclick="startD2L()">
-        Open D2L Login
-      </button>
+      <button class="btn btn-primary" id="connectBtn" onclick="startD2L()">Open D2L login</button>
 
-      <div id="vncStep" class="hidden" style="margin-top:20px">
+      <!-- Progress shown after session starts -->
+      <div id="vncStep" class="hidden">
         <div class="divider"></div>
-        <div class="step-list">
-          <div class="step-item">
-            <div class="step-num done">✓</div>
-            <div class="step-text">
+
+        <div class="steps">
+          <div class="step">
+            <div class="step-dot done">✓</div>
+            <div class="step-body">
               <h4>Session started</h4>
               <p>A secure browser has been opened for you.</p>
             </div>
           </div>
-          <div class="step-item">
-            <div class="step-num active" id="step2num">2</div>
-            <div class="step-text">
+          <div class="step">
+            <div class="step-dot active" id="step2dot">2</div>
+            <div class="step-body">
               <h4>Log in to D2L</h4>
               <p>Use your university credentials and approve Duo on your phone.</p>
             </div>
           </div>
-          <div class="step-item">
-            <div class="step-num" id="step3num">3</div>
-            <div class="step-text">
-              <h4>Auto-detected</h4>
-              <p>We'll capture your session automatically once you're in.</p>
+          <div class="step">
+            <div class="step-dot" id="step3dot">3</div>
+            <div class="step-body">
+              <h4>Session captured</h4>
+              <p>We'll detect your login automatically — no extra steps needed.</p>
             </div>
           </div>
         </div>
 
-        <a id="vncLink" href="#" target="_blank" class="open-btn">
-          🖥️ Open Login Browser
+        <a id="vncLink" href="#" target="_blank" class="vnc-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          Open login browser
         </a>
 
-        <div class="waiting-badge">
-          <span class="spinner" style="border-top-color:#fcd34d; border-color:rgba(252,211,77,0.3)"></span>
+        <div class="waiting">
+          <span class="spin" style="border-top-color:#fbbf24; border-color:rgba(251,191,36,0.2)"></span>
           Waiting for you to log in…
         </div>
       </div>
     </div>
 
-    <!-- STEP 3: Success -->
+    <!-- ── Step 3: Success ──────────────────────────────────────────── -->
     <div id="stepSuccess" class="card hidden">
-      <div class="success-icon">🎉</div>
-      <div class="success-title">You're all set!</div>
-      <div class="success-sub">D2L connected. Use the URL below in Poke or any MCP client.</div>
+      <div class="success-header">
+        <div class="success-icon">🎉</div>
+        <h2>You're all set</h2>
+        <p>D2L connected. Add the URL below to your MCP client.</p>
+      </div>
 
-      <div class="mcp-box">
-        <div class="mcp-box-label">Your MCP Server URL</div>
-        <div class="mcp-url" id="mcpUrl"></div>
+      <div class="url-box">
+        <div class="url-box-label">MCP Server URL</div>
+        <div class="url-value" id="mcpUrl"></div>
         <button class="copy-btn" onclick="copyUrl()">
-          <span id="copyIcon">📋</span> <span id="copyText">Copy URL</span>
+          <span id="copyIcon">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </span>
+          <span id="copyText">Copy URL</span>
         </button>
         <div class="poke-hint">
           In Poke: <strong>Settings → MCP Servers → Add</strong><br>
-          Paste the URL above, then add header:<br>
+          Then add a request header:<br>
           <code>Authorization: Bearer &lt;your token&gt;</code>
         </div>
       </div>
 
       <div class="divider"></div>
-      <button class="link-btn" style="display:block; text-align:center; width:100%" onclick="reset()">
-        Connect another account
-      </button>
+
+      <button class="btn btn-ghost" onclick="reset()">Connect another account</button>
     </div>
 
   </div>
@@ -471,32 +604,34 @@
       mode = t;
       document.getElementById('tabSignin').classList.toggle('active', t === 'signin');
       document.getElementById('tabSignup').classList.toggle('active', t === 'signup');
-      document.getElementById('authBtn').textContent = t === 'signin' ? 'Sign In' : 'Create Account';
+      document.getElementById('authBtn').textContent = t === 'signin' ? 'Sign in' : 'Create account';
       document.getElementById('switchText').textContent = t === 'signin' ? "Don't have an account?" : 'Already have an account?';
-      document.getElementById('switchBtn').textContent = t === 'signin' ? 'Create one' : 'Sign in';
-      document.getElementById('switchBtn').onclick = () => switchTab(t === 'signin' ? 'signup' : 'signin');
-      clearAlert();
+      const switchBtn = document.getElementById('switchBtn');
+      switchBtn.textContent = t === 'signin' ? 'Create one' : 'Sign in';
+      switchBtn.onclick = () => switchTab(t === 'signin' ? 'signup' : 'signin');
+      hideAlert('alertBox');
     }
 
-    function showAlert(msg, type = 'error') {
-      const box = document.getElementById('alertBox');
+    function showAlert(id, msg, type = 'error') {
+      const box = document.getElementById(id);
       box.className = `alert alert-${type}`;
-      box.textContent = msg;
+      box.innerHTML = `<span>${type === 'error' ? '⚠' : 'ℹ'}</span> ${msg}`;
       box.classList.remove('hidden');
     }
-    function clearAlert() {
-      document.getElementById('alertBox').classList.add('hidden');
+
+    function hideAlert(id) {
+      document.getElementById(id).classList.add('hidden');
     }
 
     async function handleAuth() {
       const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
-      if (!email || !password) { showAlert('Please enter your email and password'); return; }
+      if (!email || !password) { showAlert('alertBox', 'Please enter your email and password.'); return; }
 
       const btn = document.getElementById('authBtn');
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span>' + (mode === 'signin' ? 'Signing in…' : 'Creating account…');
-      clearAlert();
+      btn.innerHTML = `<span class="spin"></span>${mode === 'signin' ? 'Signing in…' : 'Creating account…'}`;
+      hideAlert('alertBox');
 
       try {
         const res = await fetch(`${API}/auth/${mode === 'signin' ? 'signin' : 'signup'}`, {
@@ -505,29 +640,25 @@
           body: JSON.stringify({ email, password }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Authentication failed');
+        if (!res.ok) throw new Error(data.error || 'Authentication failed.');
+
         if (data.needsConfirmation) {
-          showAlert('Check your email to confirm your account, then sign in.', 'success');
+          showAlert('alertBox', 'Check your email to confirm your account, then sign in.', 'info');
           switchTab('signin');
           btn.disabled = false;
-          btn.textContent = 'Sign In';
+          btn.textContent = 'Sign in';
           return;
         }
+
         token = data.token;
-        console.log('[AUTH] signin response:', JSON.stringify(data));
-        console.log('[AUTH] token value:', token ? token.substring(0, 20) + '...' : 'NULL/UNDEFINED');
-        if (!token) {
-          showAlert('Sign in succeeded but no token was returned. Please try again.');
-          btn.disabled = false;
-          btn.textContent = mode === 'signin' ? 'Sign In' : 'Create Account';
-          return;
-        }
+        if (!token) throw new Error('No token returned — please try again.');
+
         document.getElementById('stepAuth').classList.add('hidden');
         document.getElementById('stepD2L').classList.remove('hidden');
       } catch (e) {
-        showAlert(e.message);
+        showAlert('alertBox', e.message);
         btn.disabled = false;
-        btn.textContent = mode === 'signin' ? 'Sign In' : 'Create Account';
+        btn.textContent = mode === 'signin' ? 'Sign in' : 'Create account';
       }
     }
 
@@ -535,34 +666,29 @@
       const d2lHost = document.getElementById('d2lHost').value.trim();
       const btn = document.getElementById('connectBtn');
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span>Starting session…';
-
-      const alertBox = document.getElementById('d2lAlertBox');
-      alertBox.classList.add('hidden');
+      btn.innerHTML = '<span class="spin"></span>Starting session…';
+      hideAlert('d2lAlertBox');
 
       try {
-        console.log('[D2L] starting session, token:', token ? token.substring(0, 20) + '...' : 'NULL');
         const res = await fetch(`${API}/auth/d2l/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({ d2lHost }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to start session');
+        if (!res.ok) throw new Error(data.error || 'Failed to start session.');
 
         sessionId = data.sessionId;
         document.getElementById('vncLink').href = data.vncUrl;
         document.getElementById('vncStep').classList.remove('hidden');
-        btn.innerHTML = '↺ Restart Session';
+        btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.18-5.4"/></svg> Restart session`;
         btn.disabled = false;
 
         pollInterval = setInterval(pollStatus, 2500);
       } catch (e) {
-        alertBox.className = 'alert alert-error';
-        alertBox.textContent = e.message;
-        alertBox.classList.remove('hidden');
+        showAlert('d2lAlertBox', e.message);
         btn.disabled = false;
-        btn.textContent = 'Open D2L Login';
+        btn.textContent = 'Open D2L login';
       }
     }
 
@@ -571,19 +697,17 @@
       try {
         const res = await fetch(`${API}/auth/d2l/status/${sessionId}`);
         const data = await res.json();
+
         if (data.status === 'authenticated') {
           clearInterval(pollInterval);
-          document.getElementById('step2num').className = 'step-num done';
-          document.getElementById('step2num').textContent = '✓';
-          document.getElementById('step3num').className = 'step-num done';
-          document.getElementById('step3num').textContent = '✓';
-          setTimeout(showSuccess, 800);
+          const d2 = document.getElementById('step2dot');
+          const d3 = document.getElementById('step3dot');
+          d2.className = 'step-dot done'; d2.textContent = '✓';
+          d3.className = 'step-dot done'; d3.textContent = '✓';
+          setTimeout(showSuccess, 700);
         } else if (data.status === 'failed' || data.status === 'no_session') {
           clearInterval(pollInterval);
-          const alertBox = document.getElementById('d2lAlertBox');
-          alertBox.className = 'alert alert-error';
-          alertBox.textContent = 'Session expired or failed. Please try again.';
-          alertBox.classList.remove('hidden');
+          showAlert('d2lAlertBox', 'Session expired or failed. Please try again.');
         }
       } catch {}
     }
@@ -597,10 +721,10 @@
     function copyUrl() {
       const url = document.getElementById('mcpUrl').textContent;
       navigator.clipboard.writeText(url).then(() => {
-        document.getElementById('copyIcon').textContent = '✅';
+        document.getElementById('copyIcon').innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
         document.getElementById('copyText').textContent = 'Copied!';
         setTimeout(() => {
-          document.getElementById('copyIcon').textContent = '📋';
+          document.getElementById('copyIcon').innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
           document.getElementById('copyText').textContent = 'Copy URL';
         }, 2000);
       });
@@ -613,16 +737,14 @@
       document.getElementById('stepD2L').classList.add('hidden');
       document.getElementById('stepSuccess').classList.add('hidden');
       document.getElementById('vncStep').classList.add('hidden');
-      document.getElementById('authBtn').disabled = false;
-      document.getElementById('authBtn').textContent = 'Sign In';
+      const btn = document.getElementById('authBtn');
+      btn.disabled = false; btn.textContent = 'Sign in';
       switchTab('signin');
     }
 
-    // Enter key support
     document.addEventListener('keydown', e => {
-      if (e.key === 'Enter') {
-        if (!document.getElementById('stepAuth').classList.contains('hidden')) handleAuth();
-      }
+      if (e.key !== 'Enter') return;
+      if (!document.getElementById('stepAuth').classList.contains('hidden')) handleAuth();
     });
   </script>
 </body>
