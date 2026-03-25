@@ -80,12 +80,12 @@
           "name": "API_HOST",
           "value": "api.hamzaammar.ca"
         },
-        {
-          "name": "OPENAI_API_KEY",
-          "value": "REPLACE_ME"
-        }
       ],
       "secrets": [
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:051140201449:secret:horizon-mcp/openai-api-key-QbM3t7"
+        },
         {
           "name": "SUPABASE_URL",
           "valueFrom": "arn:aws:secretsmanager:us-east-1:051140201449:secret:study-mcp/supabase-url-aL6yTm"
