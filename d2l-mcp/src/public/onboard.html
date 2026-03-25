@@ -514,6 +514,8 @@
           return;
         }
         token = data.token;
+        console.log('[AUTH] signin response:', JSON.stringify(data));
+        console.log('[AUTH] token value:', token ? token.substring(0, 20) + '...' : 'NULL/UNDEFINED');
         if (!token) {
           showAlert('Sign in succeeded but no token was returned. Please try again.');
           btn.disabled = false;
@@ -539,6 +541,7 @@
       alertBox.classList.add('hidden');
 
       try {
+        console.log('[D2L] starting session, token:', token ? token.substring(0, 20) + '...' : 'NULL');
         const res = await fetch(`${API}/auth/d2l/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
