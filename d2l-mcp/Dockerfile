@@ -40,19 +40,17 @@ RUN mkdir -p /usr/share/novnc && \
     cp -r /tmp/noVNC-1.4.0/* /usr/share/novnc/ && \
     rm -rf /tmp/novnc.tar.gz /tmp/noVNC-1.4.0
 
-# Set environment variables
-ENV DISPLAY=:99
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
-ENV SESSIONS_PATH=/sessions
-ENV NODE_ENV=production
-ENV MCP_TRANSPORT=http
-
 WORKDIR /app
 
 # Copy package files and install dependencies
 COPY package*.json ./
-RUN npm ci && npm prune --production
+RUN npm ci
+
+# Install Playwright's Chromium (used by auth.ts headless token refresh)
+RUN npx playwright install chromium --with-deps || true
+
+# Prune dev dependencies after playwright install
+RUN npm prune --production
 
 # Copy built app
 COPY dist ./dist
@@ -61,8 +59,15 @@ COPY scripts ./scripts
 # Create sessions directory (will be overridden by EFS mount in ECS)
 RUN mkdir -p /sessions
 
+# Set environment variables
+ENV SESSIONS_PATH=/sessions
+ENV NODE_ENV=production
+ENV MCP_TRANSPORT=http
+# Point Playwright to system Chromium for VNC sessions (headed mode)
+# For headless auth refreshes, Playwright uses its own installed binary
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+
 EXPOSE 3000
-# noVNC WebSocket ports (6080-6129 for up to 50 concurrent sessions)
 EXPOSE 6080-6129
 
 CMD ["node", "dist/index.js"]
