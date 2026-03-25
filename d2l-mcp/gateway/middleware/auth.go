@@ -23,8 +23,13 @@ type jwksKey struct {
 	Kty string `json:"kty"`
 	Alg string `json:"alg"`
 	Use string `json:"use"`
-	N   string `json:"n"`
-	E   string `json:"e"`
+	// RSA fields
+	N string `json:"n"`
+	E string `json:"e"`
+	// EC fields
+	Crv string `json:"crv"`
+	X   string `json:"x"`
+	Y   string `json:"y"`
 }
 
 type jwksResponse struct {
@@ -200,21 +205,24 @@ func Auth(jwksURL string) func(http.Handler) http.Handler {
 					return
 				}
 			} else {
-				// Has kid — RS256 token. Verify with JWKS.
+				// Has kid — RS256/ES256 token. Verify with JWKS.
 				jwk, err := c.getKey(kid)
 				if err != nil {
 					http.Error(w, `{"error":"could not retrieve signing key"}`, http.StatusUnauthorized)
 					return
 				}
 
-				pubKey, err := jwkToRSAPublicKey(jwk)
+				pubKey, err := jwkToPublicKey(jwk)
 				if err != nil {
 					http.Error(w, `{"error":"invalid signing key"}`, http.StatusUnauthorized)
 					return
 				}
 
 				token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-					if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+					switch t.Method.(type) {
+					case *jwt.SigningMethodRSA:
+					case *jwt.SigningMethodECDSA:
+					default:
 						return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 					}
 					return pubKey, nil
