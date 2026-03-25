@@ -573,16 +573,26 @@
       <div class="url-box">
         <div class="url-box-label">MCP Server URL</div>
         <div class="url-value" id="mcpUrl"></div>
-        <button class="copy-btn" onclick="copyUrl()">
-          <span id="copyIcon">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </span>
-          <span id="copyText">Copy URL</span>
+        <button class="copy-btn" onclick="copyField('mcpUrl', this)">
+          <span class="copy-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
+          <span class="copy-label">Copy URL</span>
         </button>
         <div class="poke-hint">
           In Poke: <strong>Settings → MCP Servers → Add</strong><br>
-          Then add a request header:<br>
-          <code>Authorization: Bearer &lt;your token&gt;</code>
+          Paste the URL above, then add the token below as a request header.
+        </div>
+      </div>
+
+      <div class="url-box" style="margin-top:12px">
+        <div class="url-box-label">Bearer Token</div>
+        <div class="url-value" id="bearerToken" style="font-size:11px; opacity:0.6; filter:blur(4px); transition:filter 0.2s; cursor:pointer; user-select:none" onclick="this.style.filter='none'; this.style.opacity='1'; this.style.cursor='text'" title="Click to reveal"></div>
+        <button class="copy-btn" onclick="copyField('bearerToken', this)">
+          <span class="copy-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
+          <span class="copy-label">Copy token</span>
+        </button>
+        <div class="poke-hint" style="margin-top:8px; padding-top:8px; border-top: 1px solid rgba(99,102,241,0.1)">
+          Click the token to reveal it. Add as request header:<br>
+          <code>Authorization: Bearer &lt;token&gt;</code>
         </div>
       </div>
 
@@ -716,16 +726,19 @@
       document.getElementById('stepD2L').classList.add('hidden');
       document.getElementById('stepSuccess').classList.remove('hidden');
       document.getElementById('mcpUrl').textContent = `${API}/mcp`;
+      document.getElementById('bearerToken').textContent = token;
     }
 
-    function copyUrl() {
-      const url = document.getElementById('mcpUrl').textContent;
-      navigator.clipboard.writeText(url).then(() => {
-        document.getElementById('copyIcon').innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-        document.getElementById('copyText').textContent = 'Copied!';
+    function copyField(id, btn) {
+      const text = document.getElementById(id).textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const icon = btn.querySelector('.copy-icon');
+        const label = btn.querySelector('.copy-label');
+        icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+        label.textContent = 'Copied!';
         setTimeout(() => {
-          document.getElementById('copyIcon').innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-          document.getElementById('copyText').textContent = 'Copy URL';
+          icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+          label.textContent = id === 'mcpUrl' ? 'Copy URL' : 'Copy token';
         }, 2000);
       });
     }
