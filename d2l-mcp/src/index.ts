@@ -766,9 +766,31 @@ async function main() {
 
     app.delete("/mcp", mcpDeleteHandler);
 
-    app.listen(port, () => {
+    const httpServer = app.listen(port, () => {
       console.error(`D2L Brightspace MCP server running on HTTP port ${port}`);
       console.error(`Connect to: http://localhost:${port}/mcp`);
+    });
+
+    // Forward WebSocket upgrade events to the VNC proxy middleware
+    // Without this, noVNC WebSocket connections silently fail through the ALB
+    httpServer.on("upgrade", (req, socket, head) => {
+      const match = req.url?.match(/^\/vnc\/([^/]+)\/websockify/);
+      if (match) {
+        const sessionId = match[1];
+        const session = BrowserSessionManager.getSession(sessionId);
+        if (session) {
+          const { createProxyMiddleware } = require("http-proxy-middleware");
+          const wsProxy = createProxyMiddleware({
+            target: `http://localhost:${session.wsPort}`,
+            ws: true,
+            changeOrigin: true,
+            pathRewrite: { [`^/vnc/${sessionId}/websockify`]: "/" },
+          });
+          wsProxy.upgrade(req, socket, head);
+        } else {
+          socket.destroy();
+        }
+      }
     });
 
     // Handle server shutdown
