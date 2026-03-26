@@ -127,21 +127,25 @@ async function generateEmbedding(text: string): Promise<number[]> {
   return response.data[0].embedding;
 }
 
-async function upsertPiazzaPosts(rows: Array<{
-  course_id: string;
-  post_id: string;
-  title: string;
-  body: string | null;
-  url: string;
-  created_at: string | null;
-  updated_at: string | null;
-  metadata: any;
-}>) {
+async function upsertPiazzaPosts(
+  userId: string,
+  rows: Array<{
+    user_id: string;
+    course_id: string;
+    post_id: string;
+    title: string;
+    body: string | null;
+    url: string;
+    created_at: string | null;
+    updated_at: string | null;
+    metadata: any;
+  }>
+) {
   if (!rows.length) return 0;
 
   const { error } = await supabase
     .from("piazza_posts")
-    .upsert(rows, { onConflict: "course_id,post_id" });
+    .upsert(rows, { onConflict: "user_id,course_id,post_id" });
 
   if (error) throw new Error(`Supabase upsert piazza_posts failed: ${error.message}`);
   return rows.length;
@@ -162,11 +166,13 @@ export const PiazzaTools = {
       sinceDays = 21,
       maxPosts = 40,
       highSignalOnly = true,
+      userId,
     }: {
       courseId?: string;
       sinceDays?: number;
       maxPosts?: number;
       highSignalOnly?: boolean;
+      userId: string;
     }): Promise<string> => {
       try {
         const map = piazzaMap as PiazzaMap;
@@ -176,7 +182,26 @@ export const PiazzaTools = {
           return JSON.stringify({ success: false, error: `Course ${courseId} not found in piazza_map.json` }, null, 2);
         }
 
-        const cookieHeader = await getPiazzaCookieHeader();
+        // Get and validate cookies before proceeding
+        let cookieHeader: string;
+        try {
+          cookieHeader = await getPiazzaCookieHeader(userId);
+          // Additional validation: ensure session_id exists
+          if (!cookieHeader || !cookieHeader.includes("session_id=")) {
+            return JSON.stringify({ 
+              success: false, 
+              error: "Piazza authentication required. Please re-authenticate via mobile app WebView login.",
+              requiresReauth: true
+            }, null, 2);
+          }
+        } catch (authError) {
+          const authErrorMsg = authError instanceof Error ? authError.message : String(authError);
+          return JSON.stringify({ 
+            success: false, 
+            error: `Piazza authentication failed: ${authErrorMsg}`,
+            requiresReauth: true
+          }, null, 2);
+        }
         const cutoffMs = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
 
         let totalFetched = 0;
@@ -190,11 +215,12 @@ export const PiazzaTools = {
           }
 
           try {
-            // Purge old rows for this course to keep DB bounded
+            // Purge old rows for this user+course to keep DB bounded
             const cutoffIso = new Date(cutoffMs).toISOString();
             await supabase
               .from("piazza_posts")
               .delete()
+              .eq("user_id", userId)
               .eq("course_id", course)
               .lt("updated_at", cutoffIso);
 
@@ -209,6 +235,7 @@ export const PiazzaTools = {
 
             const items: FeedItem[] = feed?.feed ?? feed?.data ?? (Array.isArray(feed) ? feed : []);
             const rows: Array<{
+              user_id: string;
               course_id: string;
               post_id: string;
               title: string;
@@ -240,6 +267,7 @@ export const PiazzaTools = {
               if (highSignalOnly && !high) continue;
 
               rows.push({
+                user_id: userId,
                 course_id: course,
                 post_id: cid,
                 title,
@@ -256,7 +284,7 @@ export const PiazzaTools = {
             }
 
             totalFetched += rows.length;
-            const upserted = await upsertPiazzaPosts(rows);
+            const upserted = await upsertPiazzaPosts(userId, rows);
             totalUpserted += upserted;
 
             details.push({ course, ok: true, nid, posts_fetched: rows.length, posts_upserted: upserted });
@@ -294,15 +322,18 @@ export const PiazzaTools = {
       courseId,
       limit = 100,
       minChars = 200,
+      userId,
     }: {
       courseId?: string;
       limit?: number;
       minChars?: number;
+      userId: string;
     }): Promise<string> => {
       try {
         let query = supabase
           .from("piazza_posts")
           .select("id, title, body")
+          .eq("user_id", userId)
           .is("embedding", null)
           .limit(limit);
 
@@ -350,7 +381,11 @@ export const PiazzaTools = {
         }
 
         // remaining count
-        let remainingQuery = supabase.from("piazza_posts").select("id", { count: "exact", head: true }).is("embedding", null);
+        let remainingQuery = supabase
+          .from("piazza_posts")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .is("embedding", null);
         if (courseId) remainingQuery = remainingQuery.eq("course_id", courseId);
 
         const { count: remaining } = await remainingQuery;
@@ -380,7 +415,7 @@ export const PiazzaTools = {
       query: z.string().describe("Search query."),
       topK: z.number().optional().describe("Number of results. Defaults to 5."),
     },
-    handler: async ({ courseId, query, topK = 5 }: { courseId?: string; query: string; topK?: number }): Promise<string> => {
+    handler: async ({ courseId, query, topK = 5, userId }: { courseId?: string; query: string; topK?: number; userId: string }): Promise<string> => {
       try {
         if (!query) return JSON.stringify({ success: false, error: "query is required" }, null, 2);
 
@@ -390,6 +425,7 @@ export const PiazzaTools = {
           query_embedding: qEmb,
           match_count: Math.max(topK, 5),
           course_filter: courseId ?? null,
+          user_filter: userId,
         });
 
         if (error) return JSON.stringify({ success: false, error: error.message }, null, 2);
@@ -419,11 +455,9 @@ export const PiazzaTools = {
       title: z.string().describe("Task title"),
       description: z.string().optional().describe("Optional task description"),
     },
-    handler: async ({ courseId, title, description }: { courseId: string; title: string; description?: string }): Promise<string> => {
+    handler: async ({ courseId, title, description, userId }: { courseId: string; title: string; description?: string; userId: string }): Promise<string> => {
       const query = description ? `${title}\n${description}` : title;
-      // reuse piazza_semantic_search
-      // @ts-ignore
-      return await PiazzaTools.piazza_semantic_search.handler({ courseId, query, topK: 3 });
+      return await PiazzaTools.piazza_semantic_search.handler({ courseId, query, topK: 3, userId });
     },
   },
 };

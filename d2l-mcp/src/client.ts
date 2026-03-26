@@ -1,4 +1,5 @@
 import { getToken } from "./auth.js";
+import { getSessionCookies } from "./auth-valence.js";
 
 const D2L_HOST = process.env.D2L_HOST || "learn.ul.ie";
 const BASE_URL = `https://${D2L_HOST}`;
@@ -10,25 +11,62 @@ interface ApiResponse<T = unknown> {
 }
 
 export class D2LClient {
+  private userId?: string;
+  private host?: string;
+
+  constructor(userId?: string, host?: string) {
+    this.userId = userId;
+    this.host = host;
+  }
+
   private async request<T>(
     method: string,
     path: string,
     body?: unknown
   ): Promise<ApiResponse<T>> {
     const requestStartTime = Date.now();
-    const url = `${BASE_URL}${path}`;
+    const baseUrl = this.host ? `https://${this.host}` : BASE_URL;
+    const url = `${baseUrl}${path}`;
 
     console.error(`[API] Starting ${method} request to: ${path}`);
 
     const tokenStartTime = Date.now();
-    const token = await getToken();
+    
+    // Try Valence API session-based auth first (cookie-based, more reliable)
+    let cookieString: string | null = null;
+    try {
+      cookieString = await getSessionCookies(this.userId);
+      console.error(`[API] Session cookies obtained via Valence API pattern (${Date.now() - tokenStartTime}ms)`);
+    } catch (e) {
+      console.error(`[API] Valence auth failed, falling back to legacy: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    
+    // Fallback to legacy token-based auth
+    const token = cookieString || await getToken(this.userId);
     const tokenTime = Date.now() - tokenStartTime;
-    console.error(`[API] Token obtained (${tokenTime}ms)`);
+    console.error(`[API] Token/cookies obtained (${tokenTime}ms)`);
 
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
+
+    // Use cookies if available (Valence API pattern), otherwise try Bearer token
+    if (cookieString) {
+      headers["Cookie"] = cookieString;
+    } else if (token) {
+      // Try to parse stored VNC cookie token (JSON: { d2lSessionVal, d2lSecureSessionVal })
+      try {
+        const parsed = JSON.parse(token);
+        if (parsed.d2lSessionVal && parsed.d2lSecureSessionVal) {
+          headers["Cookie"] = `d2lSessionVal=${parsed.d2lSessionVal}; d2lSecureSessionVal=${parsed.d2lSecureSessionVal}`;
+        } else {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+      } catch {
+        // Plain token string — use as Bearer
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+    }
 
     const options: RequestInit = {
       method,
@@ -168,4 +206,12 @@ export class D2LClient {
   }
 }
 
-export const client = new D2LClient();
+// Lazy proxy — picks up the current request's userId from AsyncLocalStorage on each call.
+import { getUserId } from "./utils/userContext.js";
+
+export const client: D2LClient = new Proxy({} as D2LClient, {
+  get(_target, prop) {
+    const instance = new D2LClient(getUserId());
+    return (instance as any)[prop]?.bind(instance);
+  },
+});

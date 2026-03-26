@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import express from "express";
 import cors from "cors";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -22,10 +23,19 @@ import { PlanningTools } from "./study/src/planning.js";
 import { NotesTools } from "./study/src/notes.js";
 import { SyncTools } from "./study/src/sync.js";
 import { PiazzaTools } from "./study/src/piazza.js";
+import { getUserId, runWithUserId } from "./utils/userContext.js";
+import { embedText } from "./rag/embeddings.js";
+import { semanticSearch } from "./rag/vectorStore.js";
+import { authMiddleware } from "./api/auth.js";
+import apiRoutes from "./api/routes.js";
+import d2lAuthRoutes from "./api/d2lAuthRoutes.js";
+import publicAuthRoutes from "./api/publicAuthRoutes.js";
+import { BrowserSessionManager } from "./browser/BrowserSessionManager.js";
+import { fileURLToPath } from "url";
 
 function createServer(): McpServer {
   console.error("[INIT] createServer() called - starting MCP server initialization");
-  
+
   const server = new McpServer({
     name: "study-mcp",
     version: "1.0.0",
@@ -56,6 +66,17 @@ function createServer(): McpServer {
         throw error;
       }
     };
+  };
+
+  // Study tools: inject userId from MCP_USER_ID (or 'legacy') on each request
+  const wrapStudyToolHandler = (
+    toolName: string,
+    handler: (args: any) => Promise<string>
+  ) => {
+    return wrapToolHandler(toolName, async (args: any) => {
+      const userId = getUserId();
+      return handler({ ...args, userId });
+    });
   };
 
   // Register assignment tools
@@ -282,97 +303,130 @@ function createServer(): McpServer {
     );
   });
 
-  // Register Planning tools
+  // Register Planning tools (multi-user: userId injected from MCP_USER_ID)
   server.tool(
     "tasks_list",
     PlanningTools.tasks_list.description,
     PlanningTools.tasks_list.schema,
-    wrapToolHandler("tasks_list", PlanningTools.tasks_list.handler)
+    wrapStudyToolHandler("tasks_list", PlanningTools.tasks_list.handler)
   );
 
   server.tool(
     "tasks_complete",
     PlanningTools.tasks_complete.description,
     PlanningTools.tasks_complete.schema,
-    wrapToolHandler("tasks_complete", PlanningTools.tasks_complete.handler)
+    wrapStudyToolHandler("tasks_complete", PlanningTools.tasks_complete.handler)
   );
 
   server.tool(
     "notes_sync",
     NotesTools.notes_sync.description,
     NotesTools.notes_sync.schema,
-    wrapToolHandler("notes_sync", NotesTools.notes_sync.handler)
+    wrapStudyToolHandler("notes_sync", NotesTools.notes_sync.handler)
   );
 
   server.tool(
     "notes_search",
     NotesTools.notes_search.description,
     NotesTools.notes_search.schema,
-    wrapToolHandler("notes_search", NotesTools.notes_search.handler)
+    wrapStudyToolHandler("notes_search", NotesTools.notes_search.handler)
   );
 
   server.tool(
     "notes_suggest_for_item",
     NotesTools.notes_suggest_for_item.description,
     NotesTools.notes_suggest_for_item.schema,
-    wrapToolHandler("notes_suggest_for_item", NotesTools.notes_suggest_for_item.handler)
+    wrapStudyToolHandler("notes_suggest_for_item", NotesTools.notes_suggest_for_item.handler)
   );
 
   server.tool(
     "notes_embed_missing",
     NotesTools.notes_embed_missing.description,
     NotesTools.notes_embed_missing.schema,
-    wrapToolHandler("notes_embed_missing", NotesTools.notes_embed_missing.handler)
+    wrapStudyToolHandler("notes_embed_missing", NotesTools.notes_embed_missing.handler)
+  );
+
+  // RAG semantic search over note_chunks (vector embeddings in note_chunks table)
+  server.tool(
+    "semantic_search_notes",
+    "Semantic (vector) search over your note chunks using AI embeddings. Returns the most relevant note passages for a given query, ranked by cosine similarity. Optionally filter by course ID.",
+    {
+      query: z.string().describe("Natural language search query (e.g., 'integration by parts', 'Newton's second law')."),
+      courseId: z.string().optional().describe("Optionally restrict search to a specific course ID (e.g., 'MATH119')."),
+      limit: z.number().optional().describe("Maximum number of results to return. Defaults to 10."),
+    },
+    wrapStudyToolHandler("semantic_search_notes", async ({ query, courseId, limit = 10, userId }: { query: string; courseId?: string; limit?: number; userId: string }) => {
+      if (!query) {
+        return JSON.stringify({ success: false, error: "query is required" }, null, 2);
+      }
+      try {
+        const queryEmbedding = await embedText(query);
+        const results = await semanticSearch(userId, queryEmbedding, courseId, limit);
+        if (results.length === 0) {
+          return JSON.stringify({ success: true, query, courseId, count: 0, results: [], message: "No matching note chunks found" }, null, 2);
+        }
+        const formatted = results.map((r) => ({
+          similarity: Math.round(r.similarity * 1000) / 1000,
+          courseId: r.courseId,
+          chunkIndex: r.chunkIndex,
+          preview: r.content.slice(0, 300),
+          metadata: r.metadata,
+        }));
+        return JSON.stringify({ success: true, query, courseId, count: formatted.length, results: formatted }, null, 2);
+      } catch (error) {
+        return JSON.stringify({ success: false, error: error instanceof Error ? error.message : String(error) }, null, 2);
+      }
+    })
   );
 
   server.tool(
     "sync_all",
     SyncTools.sync_all.description,
     SyncTools.sync_all.schema,
-    wrapToolHandler("sync_all", SyncTools.sync_all.handler)
+    wrapStudyToolHandler("sync_all", SyncTools.sync_all.handler)
   );
 
   server.tool(
     "plan_week",
     PlanningTools.plan_week.description,
     PlanningTools.plan_week.schema,
-    wrapToolHandler("plan_week", PlanningTools.plan_week.handler)
-  )
+    wrapStudyToolHandler("plan_week", PlanningTools.plan_week.handler)
+  );
 
   server.tool(
     "tasks_add",
     PlanningTools.tasks_add.description,
     PlanningTools.tasks_add.schema,
-    wrapToolHandler("task_add", PlanningTools.tasks_add.handler)
+    wrapStudyToolHandler("tasks_add", PlanningTools.tasks_add.handler)
   );
 
-  // Register Piazza study tools
+  // Register Piazza study tools (multi-user: userId injected from MCP_USER_ID)
   server.tool(
     "piazza_sync",
     PiazzaTools.piazza_sync.description,
     PiazzaTools.piazza_sync.schema,
-    wrapToolHandler("piazza_sync", PiazzaTools.piazza_sync.handler)
+    wrapStudyToolHandler("piazza_sync", PiazzaTools.piazza_sync.handler)
   );
 
   server.tool(
     "piazza_embed_missing",
     PiazzaTools.piazza_embed_missing.description,
     PiazzaTools.piazza_embed_missing.schema,
-    wrapToolHandler("piazza_embed_missing", PiazzaTools.piazza_embed_missing.handler)
+    wrapStudyToolHandler("piazza_embed_missing", PiazzaTools.piazza_embed_missing.handler)
   );
 
   server.tool(
     "piazza_semantic_search",
     PiazzaTools.piazza_semantic_search.description,
     PiazzaTools.piazza_semantic_search.schema,
-    wrapToolHandler("piazza_semantic_search", PiazzaTools.piazza_semantic_search.handler)
+    wrapStudyToolHandler("piazza_semantic_search", PiazzaTools.piazza_semantic_search.handler)
   );
 
   server.tool(
     "piazza_suggest_for_item",
     PiazzaTools.piazza_suggest_for_item.description,
     PiazzaTools.piazza_suggest_for_item.schema,
-    wrapToolHandler("piazza_suggest_for_item", PiazzaTools.piazza_suggest_for_item.handler)
+    wrapStudyToolHandler("piazza_suggest_for_item", PiazzaTools.piazza_suggest_for_item.handler)
   );
 
   return server;
@@ -394,13 +448,40 @@ async function main() {
       : 3000;
     const app = express();
 
-    app.use(express.json());
+    app.use(express.json({ limit: '10mb' }));
+    app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     app.use(
       cors({
         origin: "*",
         exposedHeaders: ["Mcp-Session-Id"],
       })
     );
+
+    // Health check (no auth) for ALB / load balancers
+    app.get("/health", (_req, res) => res.json({ ok: true }));
+
+    // Onboarding page (no auth)
+    const publicDir = path.join(process.cwd(), "dist", "public");
+    app.use(express.static(publicDir));
+    app.get("/onboard", (_req, res) => {
+      const filePath = path.join(publicDir, "onboard.html");
+      console.error(`[ONBOARD] Serving from: ${filePath}`);
+      res.sendFile(filePath, (err) => {
+        if (err) {
+          console.error(`[ONBOARD] sendFile error:`, err);
+          res.status(500).send(`File not found: ${filePath}`);
+        }
+      });
+    });
+
+    // Public auth routes (signup/signin for onboarding — no JWT required)
+    app.use("/auth", publicAuthRoutes);
+
+    // D2L auth routes (browser streaming)
+    app.use("/", d2lAuthRoutes);
+
+    // REST API (app-first): /api/notes, /api/search, /api/dashboard
+    app.use("/api", authMiddleware, apiRoutes);
 
     // Map to store transports by session ID
     const transports: Record<string, StreamableHTTPServerTransport> = {};
@@ -447,6 +528,11 @@ async function main() {
         res.status(401).json({ error: "Unauthorized" });
         return;
       }
+
+      // Extract userId from X-User-Id header (injected by Go gateway after JWT verification)
+      const requestUserId = (req.headers["x-user-id"] as string) || "legacy";
+
+      return runWithUserId(requestUserId, async () => {
       const requestStartTime = Date.now();
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
       const requestMethod = req.body?.method || "unknown";
@@ -618,6 +704,7 @@ async function main() {
           });
         }
       }
+      }); // end runWithUserId
     };
 
     app.post("/mcp", mcpPostHandler);
@@ -721,30 +808,47 @@ async function main() {
 
     app.delete("/mcp", mcpDeleteHandler);
 
-    app.listen(port, () => {
+    const httpServer = app.listen(port, () => {
       console.error(`D2L Brightspace MCP server running on HTTP port ${port}`);
       console.error(`Connect to: http://localhost:${port}/mcp`);
     });
 
-    // Handle server shutdown
-    process.on("SIGINT", async () => {
-      console.error("Shutting down server...");
-      // Close all active transports to properly clean up resources
-      for (const sessionId in transports) {
-        try {
-          console.error(`Closing transport for session ${sessionId}`);
-          await transports[sessionId].close();
-          delete transports[sessionId];
-        } catch (error) {
-          console.error(
-            `Error closing transport for session ${sessionId}:`,
-            error
-          );
+    // Forward WebSocket upgrade events to the VNC proxy middleware
+    // Without this, noVNC WebSocket connections silently fail through the ALB
+    httpServer.on("upgrade", (req, socket, head) => {
+      const match = req.url?.match(/^\/vnc\/([^/]+)\/websockify/);
+      if (match) {
+        const sessionId = match[1];
+        const session = BrowserSessionManager.getSession(sessionId);
+        if (session) {
+          const wsProxy = createProxyMiddleware({
+            target: `http://localhost:${session.wsPort}`,
+            ws: true,
+            changeOrigin: true,
+            pathRewrite: { [`^/vnc/${sessionId}/websockify`]: "/" },
+          });
+          wsProxy.upgrade(req, socket as any, head);
+        } else {
+          socket.destroy();
         }
       }
+    });
+
+    // Handle server shutdown
+    const shutdown = async () => {
+      console.error("Shutting down server...");
+      for (const sessionId in transports) {
+        try {
+          await transports[sessionId].close();
+          delete transports[sessionId];
+        } catch {}
+      }
+      await BrowserSessionManager.closeAll();
       console.error("Server shutdown complete");
       process.exit(0);
-    });
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   } else {
     console.error(
       `Invalid MCP_TRANSPORT value: ${transportType}. Must be 'stdio', 'http', or 'https'`

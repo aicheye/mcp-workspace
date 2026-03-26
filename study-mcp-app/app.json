@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Horizon",
+    "slug": "horizon",
+    "scheme": "horizon",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ca.hamzaammar.horizon",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Horizon uses your photo library to attach images to notes.",
+        "NSCameraUsageDescription": "Horizon uses your camera to capture documents for notes.",
+        "NSMicrophoneUsageDescription": "Horizon may use the microphone for voice notes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "ca.hamzaammar.horizon"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#6366f1",
+          "sounds": []
+        }
+      ]
+    ]
+  }
+}
