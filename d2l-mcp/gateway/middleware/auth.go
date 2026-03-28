@@ -154,6 +154,37 @@ func verifyHS256(tokenStr string) (string, error) {
 	return sub, nil
 }
 
+// verifyWithAllJWKSKeys tries every key in the JWKS cache — for tokens with no kid header.
+func verifyWithAllJWKSKeys(tokenStr string, c *jwksCache) (string, error) {
+	c.mu.RLock()
+	keys := make([]*jwksKey, 0, len(c.keys))
+	for _, k := range c.keys {
+		keys = append(keys, k)
+	}
+	c.mu.RUnlock()
+
+	if len(keys) == 0 {
+		if err := c.refresh(); err != nil {
+			return "", fmt.Errorf("JWKS empty and refresh failed: %w", err)
+		}
+		c.mu.RLock()
+		for _, k := range c.keys {
+			keys = append(keys, k)
+		}
+		c.mu.RUnlock()
+	}
+
+	var lastErr error
+	for _, k := range keys {
+		sub, err := verifyWithJWKS(tokenStr, k)
+		if err == nil {
+			return sub, nil
+		}
+		lastErr = err
+	}
+	return "", fmt.Errorf("no JWKS key verified token: %w", lastErr)
+}
+
 // verifyWithJWKS verifies a token using a JWKS key.
 func verifyWithJWKS(tokenStr string, jwk *jwksKey) (string, error) {
 	pubKey, err := jwkToPublicKey(jwk)
@@ -229,22 +260,33 @@ func Auth(jwksURL string) func(http.Handler) http.Handler {
 			}
 
 			kid, hasKid := unverified.Header["kid"].(string)
+			alg, _ := unverified.Header["alg"].(string)
 			var sub string
 
 			if !hasKid || kid == "" {
-				// No kid — HS256 token. Verify with JWT secret.
-				sub, err = verifyHS256(tokenStr)
-				if err != nil {
-					fmt.Printf("[AUTH] HS256 verification failed (no kid): %v\n", err)
-					http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
-					return
+				// No kid header. Check alg to decide path.
+				if alg == "HS256" || alg == "HS384" || alg == "HS512" || alg == "" {
+					// HS token — verify with JWT secret
+					sub, err = verifyHS256(tokenStr)
+					if err != nil {
+						fmt.Printf("[AUTH] HS256 verification failed (no kid): %v\n", err)
+						http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+						return
+					}
+				} else {
+					// ES256/RS256 without kid — try all JWKS keys
+					sub, err = verifyWithAllJWKSKeys(tokenStr, c)
+					if err != nil {
+						fmt.Printf("[AUTH] JWKS (no kid, alg=%s) verification failed: %v\n", alg, err)
+						http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+						return
+					}
 				}
 			} else {
 				// Has kid — try JWKS first.
 				jwk, jwkErr := c.getKey(kid)
 				if jwkErr != nil {
-					// kid not in JWKS — could be a rotated key or an HS256 token that
-					// happens to have a kid field. Try HS256 fallback.
+					// kid not in JWKS — try HS256 fallback
 					fmt.Printf("[AUTH] kid=%q not in JWKS (%v), trying HS256 fallback\n", kid, jwkErr)
 					sub, err = verifyHS256(tokenStr)
 					if err != nil {
