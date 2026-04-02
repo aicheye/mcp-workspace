@@ -17,27 +17,26 @@ function getSessionPath(userId?: string): string {
 
 // Load D2L token for a user from database
 async function getD2LToken(userId?: string): Promise<{ host: string; token: string; updated_at?: string } | null> {
-  if (userId) {
-    try {
-      const { data, error } = await supabase
-        .from("user_credentials")
-        .select("host, token, updated_at")
-        .eq("user_id", userId)
-        .eq("service", "d2l")
-        .limit(1);
-      
-      const cred = Array.isArray(data) ? data[0] : data;
-
-      if (!error && cred && cred.token) {
-        return {
-          host: cred.host || process.env.D2L_HOST || "learn.ul.ie",
-          token: cred.token,
-          updated_at: cred.updated_at,
-        };
-      }
-    } catch (e) {
-      console.error("[AUTH] Error loading D2L token from DB:", e);
+  if (!userId) return null;
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) return null;
+    const restUrl = `${sbUrl}/rest/v1/user_credentials?user_id=eq.${userId}&service=eq.d2l&select=host,token,updated_at&limit=1`;
+    const resp = await fetch(restUrl, {
+      headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+    });
+    if (!resp.ok) return null;
+    const rows = await resp.json() as Array<{ host: string; token: string; updated_at: string }>;
+    if (rows.length > 0 && rows[0].token) {
+      return {
+        host: rows[0].host || process.env.D2L_HOST || "learn.uwaterloo.ca",
+        token: rows[0].token,
+        updated_at: rows[0].updated_at,
+      };
     }
+  } catch (e) {
+    console.error("[AUTH] Error loading D2L token from DB:", e);
   }
   return null;
 }
@@ -46,21 +45,23 @@ async function getD2LToken(userId?: string): Promise<{ host: string; token: stri
 async function getD2LCredentials(userId?: string): Promise<{ host: string; username: string; password: string } | null> {
   if (userId) {
     try {
-      const { data, error } = await supabase
-        .from("user_credentials")
-        .select("host, username, password")
-        .eq("user_id", userId)
-        .eq("service", "d2l")
-        .limit(1);
-      
-      const cred = Array.isArray(data) ? data[0] : data;
-
-      if (!error && cred && cred.username && cred.password) {
-        return {
-          host: cred.host || process.env.D2L_HOST || "learn.ul.ie",
-          username: cred.username,
-          password: cred.password,
-        };
+      const sbUrl = process.env.SUPABASE_URL;
+      const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+      if (sbUrl && sbKey) {
+        const restUrl = `${sbUrl}/rest/v1/user_credentials?user_id=eq.${userId}&service=eq.d2l&select=host,username,password&limit=1`;
+        const resp = await fetch(restUrl, {
+          headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+        });
+        if (resp.ok) {
+          const rows = await resp.json() as Array<{ host: string; username: string; password: string }>;
+          if (rows.length > 0 && rows[0].username && rows[0].password) {
+            return {
+              host: rows[0].host || process.env.D2L_HOST || "learn.uwaterloo.ca",
+              username: rows[0].username,
+              password: rows[0].password,
+            };
+          }
+        }
       }
     } catch (e) {
       console.error("[AUTH] Error loading D2L credentials from DB:", e);

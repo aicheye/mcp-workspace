@@ -299,6 +299,39 @@ export class BrowserSessionManager {
         return;
       }
 
+      // Validate cookies by making a test D2L API call before storing
+      try {
+        const testUrl = `https://${d2lHost}/d2l/api/lp/1.43/users/whoami`;
+        const testResp = await fetch(testUrl, {
+          headers: { "Cookie": `d2lSessionVal=${sessionVal}; d2lSecureSessionVal=${secureVal}` },
+          redirect: "manual",
+        });
+        if (testResp.status === 403 || testResp.status === 302) {
+          console.error(`[VNC] Captured cookies are stale (status ${testResp.status}) for user ${userId} — forcing fresh login`);
+          // Clear S3 state so next session forces real login
+          try {
+            const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
+            await s3.send(new DeleteObjectCommand({
+              Bucket: S3_BUCKET,
+              Key: `browser-state/${userId}/storage-state.json`,
+            }));
+            console.error(`[VNC] Deleted stale S3 browser state for user ${userId}`);
+          } catch (e: any) {
+            console.error(`[VNC] Failed to delete S3 state: ${e?.message}`);
+          }
+          session.status = "waiting";
+          // Navigate to login page to force fresh auth
+          try {
+            await session.page.goto(`https://${d2lHost}/d2l/login`, { timeout: 10000 });
+          } catch {}
+          BrowserSessionManager._watchForLogin(sessionId, userId, d2lHost, session.page, context);
+          return;
+        }
+        console.error(`[VNC] Cookie validation passed (status ${testResp.status}) for user ${userId}`);
+      } catch (valErr: any) {
+        console.error(`[VNC] Cookie validation error: ${valErr.message} — storing anyway`);
+      }
+
       // Save FULL storage state (all cookies incl. ADFS) to S3 for session resumption
       const tmpStatePath = path.join(os.tmpdir(), `storage-state-${sessionId}.json`);
       await context.storageState({ path: tmpStatePath });
