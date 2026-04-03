@@ -28,6 +28,19 @@ func NewProxy() http.HandlerFunc {
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
+	// Strip CORS headers from the upstream response so the gateway's own CORS
+	// middleware is the single source of truth. Duplicate Allow-Origin headers
+	// cause browsers to reject the response entirely.
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Del("Access-Control-Allow-Origin")
+		resp.Header.Del("Access-Control-Allow-Methods")
+		resp.Header.Del("Access-Control-Allow-Headers")
+		resp.Header.Del("Access-Control-Allow-Credentials")
+		resp.Header.Del("Access-Control-Expose-Headers")
+		resp.Header.Del("Access-Control-Max-Age")
+		return nil
+	}
+
 	// Customise error handling so proxy failures return proper JSON.
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		fmt.Printf("[PROXY] upstream error: %v\n", err)
