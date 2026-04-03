@@ -16,6 +16,79 @@ import { registerDeviceToken, sendPushToUser, checkAndNotifyUpdates } from "./pu
 
 const router = Router();
 
+import { randomBytes, createHash } from "node:crypto";
+
+/** POST /api/keys — generate API key for current user. Returns plaintext key once. */
+router.post("/keys", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const headers = { "apikey": sbKey, "Authorization": `Bearer ${sbKey}`, "Content-Type": "application/json" };
+
+    // Check if user already has a key
+    const existing = await fetch(`${sbUrl}/rest/v1/api_keys?user_id=eq.${userId}&select=id&limit=1`, { headers });
+    const rows = await existing.json();
+    if (Array.isArray(rows) && rows.length > 0) {
+      res.status(409).json({ error: "API key already exists. Delete it first to generate a new one." });
+      return;
+    }
+
+    // Generate key
+    const raw = randomBytes(32);
+    const plaintext = "hzn_" + raw.toString("hex");
+    const keyHash = createHash("sha256").update(plaintext).digest("hex");
+
+    const resp = await fetch(`${sbUrl}/rest/v1/api_keys`, {
+      method: "POST",
+      headers: { ...headers, "Prefer": "return=representation" },
+      body: JSON.stringify({ user_id: userId, key_hash: keyHash, label: "default" }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    res.json({ apiKey: plaintext });
+  } catch (e: any) {
+    console.error("[API] key create error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** GET /api/keys — check if user has an API key */
+router.get("/keys", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const resp = await fetch(`${sbUrl}/rest/v1/api_keys?user_id=eq.${userId}&select=id,label,created_at&limit=1`, {
+      headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const rows = await resp.json();
+    res.json({ hasKey: Array.isArray(rows) && rows.length > 0 });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** DELETE /api/keys — revoke user's API key */
+router.delete("/keys", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const resp = await fetch(`${sbUrl}/rest/v1/api_keys?user_id=eq.${userId}`, {
+      method: "DELETE",
+      headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /** POST /api/notes/presign-upload — { filename, contentType, size, courseId? } -> { uploadUrl, s3Key } */
 router.post("/notes/presign-upload", async (req: Request, res: Response) => {
   const userId = req.userId!;

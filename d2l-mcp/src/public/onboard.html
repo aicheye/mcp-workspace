@@ -682,12 +682,16 @@
       </div>
 
       <div class="url-box" style="margin-bottom:12px">
-        <div class="url-box-label">Bearer Token (auto-renews)</div>
-        <div class="url-value" id="bearerToken" style="font-size:11px;opacity:0.6;filter:blur(4px);transition:filter 0.2s;cursor:pointer;user-select:none;margin-bottom:6px" onclick="this.style.filter='none';this.style.opacity='1';this.style.cursor='text'" title="Click to reveal"></div>
-        <button class="copy-btn" onclick="copyField('bearerToken', this)">
-          <span class="copy-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
-          <span class="copy-label">Copy token</span>
-        </button>
+        <div class="url-box-label">API Key</div>
+        <div class="url-value" id="apiKeyDisplay" style="font-size:11px;opacity:0.6;filter:blur(4px);transition:filter 0.2s;cursor:pointer;user-select:none;margin-bottom:6px" onclick="this.style.filter='none';this.style.opacity='1';this.style.cursor='text'" title="Click to reveal">Loading...</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="copy-btn" onclick="copyField('apiKeyDisplay', this)">
+            <span class="copy-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
+            <span class="copy-label">Copy key</span>
+          </button>
+          <button class="copy-btn" onclick="regenerateApiKey()" id="regenKeyBtn" style="font-size:11px">Regenerate</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">This key never expires. Use it in your AI client config.</div>
       </div>
 
       <!-- Claude Desktop -->
@@ -715,7 +719,7 @@
           <ol style="margin:0;padding-left:18px">
             <li>Open Poke &rarr; Settings &rarr; MCP Servers &rarr; Add</li>
             <li>Paste the <strong>MCP Server URL</strong> above</li>
-            <li>Add a request header:<br><code>Authorization: Bearer &lt;token&gt;</code><br>(use the token above)</li>
+            <li>Add a request header:<br><code>x-api-key: &lt;your API key&gt;</code><br>(use the key above)</li>
             <li>Save &mdash; tools appear automatically</li>
           </ol>
         </div>
@@ -955,27 +959,96 @@
       document.getElementById('stepSuccess').classList.remove('hidden');
       document.querySelector('.wrap').classList.add('wide');
       document.getElementById('mcpUrl').textContent = `${API}/mcp`;
-      document.getElementById('bearerToken').textContent = refreshToken || token;
 
-      // Populate Claude Desktop config
-      const apiKey = localStorage.getItem('hzn_apiKey');
-      const headerVal = apiKey || `Bearer ${token}`;
-      const headerKey = apiKey ? 'x-api-key' : 'Authorization';
+      loadNotes();
+      loadConnectionStatus();
+      ensureApiKey();
+    }
+
+    async function ensureApiKey() {
+      const display = document.getElementById('apiKeyDisplay');
+      // Check localStorage first
+      const cached = localStorage.getItem('hzn_apiKey');
+      if (cached) {
+        setApiKeyUI(cached);
+        return;
+      }
+      // Check if server has one (we can't retrieve it, so generate new)
+      try {
+        const checkRes = await fetch(`${API}/api/keys`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const checkData = await checkRes.json();
+        if (checkData.hasKey) {
+          // Key exists but we lost it locally — need to regenerate
+          display.textContent = 'Key exists but not saved locally.';
+          display.style.filter = 'none'; display.style.opacity = '1';
+          document.getElementById('regenKeyBtn').textContent = 'Regenerate & reveal';
+          populateConfigs(null);
+          return;
+        }
+      } catch {}
+      // No key exists — create one
+      await createApiKey();
+    }
+
+    async function createApiKey() {
+      const display = document.getElementById('apiKeyDisplay');
+      display.textContent = 'Generating...';
+      try {
+        const res = await fetch(`${API}/api/keys`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+        const data = await res.json();
+        if (data.apiKey) {
+          localStorage.setItem('hzn_apiKey', data.apiKey);
+          setApiKeyUI(data.apiKey);
+        } else {
+          display.textContent = data.error || 'Failed to generate key';
+          display.style.filter = 'none'; display.style.opacity = '1';
+          populateConfigs(null);
+        }
+      } catch (e) {
+        display.textContent = 'Error generating key';
+        display.style.filter = 'none'; display.style.opacity = '1';
+        populateConfigs(null);
+      }
+    }
+
+    async function regenerateApiKey() {
+      const btn = document.getElementById('regenKeyBtn');
+      btn.disabled = true; btn.textContent = 'Regenerating...';
+      try {
+        // Delete existing
+        await fetch(`${API}/api/keys`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        localStorage.removeItem('hzn_apiKey');
+        // Create new
+        await createApiKey();
+      } catch (e) {
+        document.getElementById('apiKeyDisplay').textContent = 'Error';
+      } finally {
+        btn.disabled = false; btn.textContent = 'Regenerate';
+      }
+    }
+
+    function setApiKeyUI(key) {
+      const display = document.getElementById('apiKeyDisplay');
+      display.textContent = key;
+      display.style.filter = 'blur(4px)'; display.style.opacity = '0.6';
+      populateConfigs(key);
+    }
+
+    function populateConfigs(apiKey) {
+      const headerVal = apiKey || '< regenerate key above >';
       const claudeJson = JSON.stringify({
         mcpServers: {
           horizon: {
             command: 'npx',
-            args: ['mcp-remote', `${API}/mcp`, '--header', `${headerKey}: ${headerVal}`]
+            args: ['mcp-remote', `${API}/mcp`, '--header', `x-api-key: ${headerVal}`]
           }
         }
       }, null, 2);
       document.getElementById('claudeConfig').textContent = claudeJson;
-
-      // Populate CLI command
-      document.getElementById('cliConfig').textContent = `claude mcp add horizon -- npx mcp-remote ${API}/mcp --header "${headerKey}: ${headerVal}"`;
-
-      loadNotes();
-      loadConnectionStatus();
+      document.getElementById('cliConfig').textContent = `claude mcp add horizon -- npx mcp-remote ${API}/mcp --header "x-api-key: ${headerVal}"`;
     }
 
     async function loadConnectionStatus() {
