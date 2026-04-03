@@ -83,4 +83,64 @@ router.post("/refresh", async (req: Request, res: Response) => {
   }
 });
 
+/** POST /auth/forgot-password — send password reset email */
+router.post("/forgot-password", async (req: Request, res: Response) => {
+  const { email, redirectTo } = req.body || {};
+  if (!email) {
+    res.status(400).json({ error: "Email required" });
+    return;
+  }
+  try {
+    const supabase = getSupabase();
+    const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined) || "https";
+    const host = req.headers.host;
+    const origin = req.headers.origin as string | undefined;
+    const fallbackBase = process.env.API_HOST ? `https://${process.env.API_HOST}` : "";
+    const inferredBase = origin || (host ? `${forwardedProto}://${host}` : fallbackBase);
+    const safeRedirect = (typeof redirectTo === "string" && redirectTo.trim()) || `${inferredBase}/onboard`;
+
+    // Always return 200 to avoid account enumeration leakage.
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: safeRedirect });
+    if (error) {
+      console.error("[AUTH] forgot-password error:", error.message);
+    }
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** POST /auth/reset-password — complete password recovery with tokens from email link */
+router.post("/reset-password", async (req: Request, res: Response) => {
+  const { accessToken, refreshToken, password } = req.body || {};
+  if (!accessToken || !refreshToken || !password) {
+    res.status(400).json({ error: "accessToken, refreshToken, and password required" });
+    return;
+  }
+  if (typeof password !== "string" || password.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
+    return;
+  }
+  try {
+    const supabase = getSupabase();
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+    if (sessionError) {
+      res.status(400).json({ error: sessionError.message });
+      return;
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    if (updateError) {
+      res.status(400).json({ error: updateError.message });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

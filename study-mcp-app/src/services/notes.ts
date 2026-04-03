@@ -7,6 +7,24 @@ import {
   Note,
 } from '../types';
 
+/** Map REST/PostgREST note row (snake_case) to app Note. */
+export function mapNoteRowFromApi(row: Record<string, unknown>): Note {
+  return {
+    id: String(row.id ?? ''),
+    title: String(row.title ?? 'Untitled'),
+    courseId: (row.course_id as string) || (row.courseId as string | undefined),
+    course_id: row.course_id as string | undefined,
+    createdAt: (row.created_at as string) || (row.createdAt as string) || '',
+    created_at: row.created_at as string | undefined,
+    updatedAt: (row.updated_at as string) || (row.updatedAt as string) || '',
+    updated_at: row.updated_at as string | undefined,
+    pageCount: (row.page_count as number) ?? (row.pageCount as number | undefined),
+    page_count: row.page_count as number | undefined,
+    chunkCount: (row.chunk_count as number) ?? (row.chunkCount as number | undefined),
+    status: row.status as string | undefined,
+  };
+}
+
 export class NotesService {
   async presignUpload(data: PresignUploadRequest): Promise<PresignUploadResponse> {
     const response = (await apiClient.post(
@@ -27,9 +45,10 @@ export class NotesService {
   async getNotes(courseId?: string): Promise<Note[]> {
     const params = courseId ? { courseId } : {};
     const response = (await apiClient.get('/notes', { params })) as {
-      data: { notes: Note[] };
+      data: { notes: Record<string, unknown>[] };
     };
-    return response.data?.notes ?? [];
+    const rows = response.data?.notes ?? [];
+    return rows.map((row) => mapNoteRowFromApi(row));
   }
 
   async deleteNote(noteId: string): Promise<void> {

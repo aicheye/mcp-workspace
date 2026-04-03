@@ -85,3 +85,21 @@ export async function getObjectBuffer(s3Key: string): Promise<Buffer | null> {
     return null;
   }
 }
+
+/**
+ * Directly upload a Buffer to S3 (used by web fallback when browser->S3 CORS fails).
+ */
+export async function putObjectBuffer(
+  s3Key: string,
+  body: Buffer,
+  contentType = "application/pdf"
+): Promise<void> {
+  const cmd = new PutObjectCommand({
+    Bucket: getBucket(),
+    Key: s3Key,
+    Body: body,
+    ContentType: contentType,
+    ContentLength: body.length,
+  });
+  await getClient().send(cmd);
+}

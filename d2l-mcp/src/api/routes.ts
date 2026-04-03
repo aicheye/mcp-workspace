@@ -3,10 +3,10 @@
  * Mount at /api. All routes use authMiddleware (req.userId).
  */
 
-import { Router, Request, Response } from "express";
+import express, { Router, Request, Response } from "express";
 import { supabase } from "../utils/supabase.js";
 import { ingestPdfBuffer, embedNoteSections, generateEmbedding, NotesTools } from "../study/src/notes.js";
-import { isS3Configured, presignUpload, presignDownload, getObjectBuffer, getBucket } from "./s3.js";
+import { isS3Configured, presignUpload, presignDownload, getObjectBuffer, getBucket, putObjectBuffer } from "./s3.js";
 import { SyncTools } from "../study/src/sync.js";
 import { PiazzaTools } from "../study/src/piazza.js";
 import { D2LClient } from "../client.js";
@@ -15,6 +15,7 @@ import { getPiazzaCookieHeader } from "../study/piazzaAuth.js";
 import { registerDeviceToken, sendPushToUser, checkAndNotifyUpdates } from "./push.js";
 
 const router = Router();
+const rawPdfUpload = express.raw({ type: "*/*", limit: "60mb" });
 
 import { randomBytes, createHash } from "node:crypto";
 
@@ -43,7 +44,8 @@ router.post("/keys", async (req: Request, res: Response) => {
     const resp = await fetch(`${sbUrl}/rest/v1/api_keys`, {
       method: "POST",
       headers: { ...headers, "Prefer": "return=representation" },
-      body: JSON.stringify({ user_id: userId, key_hash: keyHash, label: "default" }),
+      // Only columns guaranteed on RDS/PostgREST api_keys (no optional label column)
+      body: JSON.stringify({ user_id: userId, key_hash: keyHash }),
     });
     if (!resp.ok) throw new Error(await resp.text());
     res.json({ apiKey: plaintext });
@@ -60,7 +62,7 @@ router.get("/keys", async (req: Request, res: Response) => {
     const sbUrl = process.env.SUPABASE_URL;
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
     if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
-    const resp = await fetch(`${sbUrl}/rest/v1/api_keys?user_id=eq.${userId}&select=id,label,created_at&limit=1`, {
+    const resp = await fetch(`${sbUrl}/rest/v1/api_keys?user_id=eq.${userId}&select=id&limit=1`, {
       headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
     });
     if (!resp.ok) throw new Error(await resp.text());
@@ -107,6 +109,39 @@ router.post("/notes/presign-upload", async (req: Request, res: Response) => {
   } catch (e) {
     console.error("[API] presign error:", e);
     res.status(500).json({ error: "Failed to generate presigned URL" });
+  }
+});
+
+/** POST /api/notes/upload-direct?s3Key=... — fallback upload relay for browsers with S3 CORS issues */
+router.post("/notes/upload-direct", rawPdfUpload, async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const s3Key = String(req.query.s3Key || "");
+  const contentType = String(req.headers["content-type"] || "application/pdf");
+
+  if (!s3Key) {
+    res.status(400).json({ error: "s3Key query param required" });
+    return;
+  }
+  const prefix = `users/${userId}/`;
+  if (!s3Key.startsWith(prefix)) {
+    res.status(403).json({ error: "s3Key must be under your user path" });
+    return;
+  }
+  if (!isS3Configured()) {
+    res.status(503).json({ error: "S3 not configured" });
+    return;
+  }
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    res.status(400).json({ error: "Binary PDF body required" });
+    return;
+  }
+
+  try {
+    await putObjectBuffer(s3Key, req.body, contentType || "application/pdf");
+    res.json({ ok: true, bytes: req.body.length });
+  } catch (e: any) {
+    console.error("[API] upload-direct error:", e);
+    res.status(500).json({ error: e?.message || "Failed to upload file" });
   }
 });
 
@@ -468,7 +503,7 @@ router.get("/dashboard", async (req: Request, res: Response) => {
         .select("id, title, course_id, created_at, status")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(5),
+        .limit(12),
       supabase
         .from("note_sections")
         .select("id", { count: "exact", head: true })

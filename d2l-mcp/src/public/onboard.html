@@ -47,7 +47,7 @@
     }
 
     .wrap.wide {
-      max-width: 520px;
+      max-width: 960px;
     }
 
     /* ── Header ─────────────────────────────────────────────────── */
@@ -482,6 +482,23 @@
       </div>
 
       <button class="btn btn-primary" id="authBtn" onclick="handleAuth()">Sign in</button>
+      <div id="forgotWrap" style="margin-top:10px;text-align:right">
+        <button onclick="forgotPassword()" style="background:none;border:none;padding:0;color:var(--muted);font-size:12.5px;font-family:inherit;cursor:pointer;text-decoration:underline">Forgot password?</button>
+      </div>
+
+      <div id="resetBox" class="hidden" style="margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Reset your password</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">Enter a new password for your account.</div>
+        <div class="field" style="margin-bottom:8px">
+          <label>New password</label>
+          <input type="password" id="newPassword" placeholder="At least 8 characters" autocomplete="new-password" />
+        </div>
+        <div class="field" style="margin-bottom:12px">
+          <label>Confirm new password</label>
+          <input type="password" id="confirmNewPassword" placeholder="Repeat password" autocomplete="new-password" />
+        </div>
+        <button class="btn btn-primary" id="resetBtn" onclick="submitPasswordReset()">Update password</button>
+      </div>
 
       <div class="footer-link">
         <span id="switchText">Don't have an account?</span>
@@ -643,12 +660,18 @@
 
       <!-- ── Course Notes ─────────────────────────────────────────── -->
       <div class="card-head" style="margin-bottom:12px">
-        <h2 style="font-size:14px">Course Notes</h2>
-        <p>Upload PDFs to enable semantic search across your notes.</p>
+        <h2 style="font-size:14px">Your Files</h2>
+        <p>All uploaded PDFs appear here. Upload new files below.</p>
       </div>
 
       <div id="uploadAlertBox" class="hidden" style="margin-bottom:12px"></div>
 
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:11.5px;color:var(--muted)">Synced with your account</div>
+        <button class="copy-btn" onclick="loadNotes()" style="font-size:11px">Refresh list</button>
+      </div>
+
+      <div id="notesList" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
       <div id="dropZone" onclick="document.getElementById('fileInput').click()"
         style="border:1.5px dashed var(--border-hi);border-radius:var(--radius);padding:20px;text-align:center;cursor:pointer;transition:border-color 0.15s,background 0.15s"
         ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(15,23,42,0.03)'"
@@ -661,8 +684,6 @@
       </div>
 
       <div id="uploadQueue" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div>
-
-      <div id="notesList" style="margin-top:14px;display:flex;flex-direction:column;gap:6px"></div>
 
       <div class="divider"></div>
 
@@ -689,9 +710,10 @@
             <span class="copy-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
             <span class="copy-label">Copy key</span>
           </button>
-          <button class="copy-btn" onclick="regenerateApiKey()" id="regenKeyBtn" style="font-size:11px">Regenerate</button>
+          <button class="copy-btn" onclick="confirmRegenerateApiKey()" id="regenKeyBtn" style="font-size:11px">Regenerate</button>
         </div>
         <div style="font-size:11px;color:var(--muted);margin-top:6px">This key never expires. Use it in your AI client config.</div>
+        <div style="font-size:11px;color:var(--danger);margin-top:4px">Warning: regenerating revokes your current key immediately.</div>
       </div>
 
       <!-- Claude Desktop -->
@@ -753,7 +775,11 @@
     let tokenExpiresAt = null;
     let refreshTimer = null;
     let pollInterval = null;
+    let notesPoll = null;
     let sessionId = null;
+    let recoveryAccessToken = null;
+    let recoveryRefreshToken = null;
+    let recoveryMode = false;
 
     // ── Token refresh ──────────────────────────────────────────────────
     function scheduleTokenRefresh(expiresAt) {
@@ -804,14 +830,129 @@
 
     function switchTab(t) {
       mode = t;
+      if (recoveryMode) return;
       document.getElementById('tabSignin').classList.toggle('active', t === 'signin');
       document.getElementById('tabSignup').classList.toggle('active', t === 'signup');
       document.getElementById('authBtn').textContent = t === 'signin' ? 'Sign in' : 'Create account';
+      document.getElementById('forgotWrap').classList.toggle('hidden', t !== 'signin');
       document.getElementById('switchText').textContent = t === 'signin' ? "Don't have an account?" : 'Already have an account?';
       const switchBtn = document.getElementById('switchBtn');
       switchBtn.textContent = t === 'signin' ? 'Create one' : 'Sign in';
       switchBtn.onclick = () => switchTab(t === 'signin' ? 'signup' : 'signin');
       hideAlert('alertBox');
+    }
+
+    function enterRecoveryMode(accessToken, refreshTokenToken) {
+      recoveryMode = true;
+      recoveryAccessToken = accessToken;
+      recoveryRefreshToken = refreshTokenToken;
+      document.querySelector('.tabs').classList.add('hidden');
+      document.getElementById('email').closest('.field').classList.add('hidden');
+      document.getElementById('password').closest('.field').classList.add('hidden');
+      document.getElementById('authBtn').classList.add('hidden');
+      document.getElementById('forgotWrap').classList.add('hidden');
+      document.querySelector('.footer-link').classList.add('hidden');
+      document.getElementById('resetBox').classList.remove('hidden');
+      hideAlert('alertBox');
+    }
+
+    function exitRecoveryMode() {
+      recoveryMode = false;
+      recoveryAccessToken = null;
+      recoveryRefreshToken = null;
+      document.querySelector('.tabs').classList.remove('hidden');
+      document.getElementById('email').closest('.field').classList.remove('hidden');
+      document.getElementById('password').closest('.field').classList.remove('hidden');
+      document.getElementById('authBtn').classList.remove('hidden');
+      document.querySelector('.footer-link').classList.remove('hidden');
+      document.getElementById('resetBox').classList.add('hidden');
+      switchTab('signin');
+    }
+
+    function initRecoveryModeFromUrl() {
+      try {
+        const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+        const params = new URLSearchParams(hash);
+        const type = params.get('type');
+        const at = params.get('access_token');
+        const rt = params.get('refresh_token');
+        if (type === 'recovery' && at && rt) {
+          enterRecoveryMode(at, rt);
+          return true;
+        }
+      } catch {}
+      return false;
+    }
+
+    async function forgotPassword() {
+      const email = document.getElementById('email').value.trim();
+      if (!email) {
+        showAlert('alertBox', 'Enter your email first, then click Forgot password.');
+        return;
+      }
+      const btn = document.querySelector('#forgotWrap button');
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = 'Sending...';
+      try {
+        const redirectTo = `${API}/onboard`;
+        const res = await fetch(`${API}/auth/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, redirectTo }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to send reset email.');
+        showAlert('alertBox', 'If an account exists, a reset link was sent to your email.', 'info');
+      } catch (e) {
+        showAlert('alertBox', e.message || 'Failed to send reset email.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    }
+
+    async function submitPasswordReset() {
+      if (!recoveryAccessToken || !recoveryRefreshToken) {
+        showAlert('alertBox', 'Reset link expired. Request a new password reset email.');
+        return;
+      }
+      const password = document.getElementById('newPassword').value;
+      const confirm = document.getElementById('confirmNewPassword').value;
+      if (!password || password.length < 8) {
+        showAlert('alertBox', 'Password must be at least 8 characters.');
+        return;
+      }
+      if (password !== confirm) {
+        showAlert('alertBox', 'Passwords do not match.');
+        return;
+      }
+      const btn = document.getElementById('resetBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span>Updating...';
+      try {
+        const res = await fetch(`${API}/auth/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessToken: recoveryAccessToken,
+            refreshToken: recoveryRefreshToken,
+            password,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to reset password.');
+        showAlert('alertBox', 'Password updated. You can now sign in.', 'info');
+        try { window.history.replaceState({}, document.title, window.location.pathname); } catch {}
+        document.getElementById('newPassword').value = '';
+        document.getElementById('confirmNewPassword').value = '';
+        exitRecoveryMode();
+      } catch (e) {
+        showAlert('alertBox', e.message || 'Failed to reset password.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Update password';
+      }
     }
 
     function toggleCreds() {
@@ -963,6 +1104,10 @@
       loadNotes();
       loadConnectionStatus();
       ensureApiKey();
+      if (notesPoll) clearInterval(notesPoll);
+      notesPoll = setInterval(() => {
+        if (token && !document.getElementById('stepSuccess').classList.contains('hidden')) loadNotes();
+      }, 15000);
     }
 
     async function ensureApiKey() {
@@ -1014,17 +1159,32 @@
       }
     }
 
+    async function confirmRegenerateApiKey() {
+      const typed = window.prompt('Regenerating will invalidate your current API key. Type REGENERATE to continue.');
+      if (typed !== 'REGENERATE') return;
+      await regenerateApiKey();
+    }
+
     async function regenerateApiKey() {
       const btn = document.getElementById('regenKeyBtn');
       btn.disabled = true; btn.textContent = 'Regenerating...';
       try {
         // Delete existing
-        await fetch(`${API}/api/keys`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        const delRes = await fetch(`${API}/api/keys`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        if (!delRes.ok) {
+          let msg = `Failed to revoke key (${delRes.status})`;
+          try {
+            const err = await delRes.json();
+            msg = err.error || msg;
+          } catch {}
+          throw new Error(msg);
+        }
         localStorage.removeItem('hzn_apiKey');
         // Create new
         await createApiKey();
       } catch (e) {
-        document.getElementById('apiKeyDisplay').textContent = 'Error';
+        document.getElementById('apiKeyDisplay').textContent = (e && e.message) ? e.message : 'Error';
+        showAlert('uploadAlertBox', (e && e.message) ? e.message : 'Failed to regenerate API key');
       } finally {
         btn.disabled = false; btn.textContent = 'Regenerate';
       }
@@ -1199,6 +1359,7 @@
         item.querySelector('span:last-child').textContent = text;
         item.querySelector('span:last-child').style.color = color;
       };
+      const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
       try {
         // 1. Get presigned URL
@@ -1207,23 +1368,79 @@
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({ filename: file.name, contentType: 'application/pdf', size: file.size }),
         });
-        const { uploadUrl, s3Key } = await presignRes.json();
+        const presignData = await presignRes.json().catch(() => ({}));
+        if (!presignRes.ok) {
+          throw new Error(presignData.error || presignData.message || `Failed to get upload URL (${presignRes.status})`);
+        }
+        const { uploadUrl, s3Key } = presignData;
         if (!uploadUrl) throw new Error('Failed to get upload URL');
 
         setStatus('Uploading…');
 
-        // 2. Upload to S3
-        const uploadRes = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': 'application/pdf' } });
-        if (!uploadRes.ok) throw new Error('Upload failed');
+        // 2. Upload to S3 (fallback to same-origin relay if browser->S3 CORS/network fails)
+        let uploaded = false;
+        let uploadFailureMsg = '';
+        try {
+          const uploadRes = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': 'application/pdf' } });
+          if (!uploadRes.ok) {
+            uploadFailureMsg = `Upload failed (${uploadRes.status})`;
+          } else {
+            uploaded = true;
+          }
+        } catch (e) {
+          uploadFailureMsg = (e && e.message) ? e.message : 'Upload failed';
+        }
+        if (!uploaded) {
+          setStatus('Direct upload failed — trying fallback...');
+          const relayRes = await fetch(`${API}/api/notes/upload-direct?s3Key=${encodeURIComponent(s3Key)}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/pdf',
+            },
+            body: file,
+          });
+          if (!relayRes.ok) {
+            let details = uploadFailureMsg || `Upload failed (${relayRes.status})`;
+            try {
+              const err = await relayRes.json();
+              details = err.error || err.message || details;
+            } catch {}
+            throw new Error(details);
+          }
+          setStatus('Uploaded via fallback');
+        }
 
         setStatus('Processing…');
 
-        // 3. Trigger embedding
-        await fetch(`${API}/api/notes/process`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ s3Key, title: file.name.replace(/\.pdf$/i, '') }),
-        });
+        // 3. Trigger embedding (retry for eventual consistency while object propagates)
+        let processOk = false;
+        let lastProcessErr = 'Failed to process PDF';
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          setStatus(`Processing… (${attempt}/5)`);
+          const processRes = await fetch(`${API}/api/notes/process`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ s3Key, title: file.name.replace(/\.pdf$/i, '') }),
+          });
+          if (processRes.ok) {
+            processOk = true;
+            break;
+          }
+          let details = `Processing failed (${processRes.status})`;
+          try {
+            const err = await processRes.json();
+            details = err.error || err.message || err.suggestion || details;
+          } catch {}
+          lastProcessErr = details;
+          // Retry only for temporary backend/storage timing issues
+          if ((processRes.status === 503 || processRes.status === 500) && attempt < 5) {
+            await sleep(1200 * attempt);
+            continue;
+          }
+          break;
+        }
+        if (!processOk) throw new Error(lastProcessErr);
 
         item.querySelector('.spin').outerHTML = '<span style="color:#34d399;flex-shrink:0">✓</span>';
         item.querySelector('.spin') // already replaced above — noop
@@ -1232,34 +1449,50 @@
       } catch (e) {
         item.querySelector('span:first-child').textContent = '✕';
         item.querySelector('span:first-child').style.color = 'var(--danger)';
-        setStatus(e.message || 'Failed', 'var(--danger)');
+        let msg = (e && e.message) ? e.message : 'Failed';
+        if (msg === 'Load failed') msg = 'Browser upload blocked (likely CORS/network). Please retry — fallback is available.';
+        setStatus(msg, 'var(--danger)');
+        showAlert('uploadAlertBox', msg);
       }
     }
 
     async function loadNotes() {
+      const el = document.getElementById('notesList');
+      el.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 13px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px;color:var(--muted)">
+          <span class="spin"></span><span>Loading files...</span>
+        </div>`;
       try {
         const res = await fetch(`${API}/api/notes`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!res.ok) { showAlert('uploadAlertBox', `Failed to load notes: ${res.status}`); return; }
         const data = await res.json();
         const notes = data.notes || data;
-        const el = document.getElementById('notesList');
-        if (!notes?.length) { el.innerHTML = ''; return; }
+        if (!notes?.length) {
+          el.innerHTML = `
+            <div style="padding:14px;border:1px dashed var(--border-hi);border-radius:var(--radius-sm);background:var(--surface2)">
+              <div style="font-size:12.5px;font-weight:500;margin-bottom:2px">No PDFs yet</div>
+              <div style="font-size:11.5px;color:var(--muted)">Upload a PDF below and it will appear in this list.</div>
+            </div>`;
+          return;
+        }
         el.innerHTML = notes.map(n => {
+          const safeTitle = String(n.title || 'Untitled').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
           const statusColor = n.status === 'ready' ? 'var(--success)' : n.status === 'error' ? 'var(--danger)' : 'var(--warn)';
           const statusLabel = n.status === 'ready' ? 'Ready' : n.status === 'processing' ? 'Processing...' : n.status === 'error' ? 'Error' : n.status;
           const pages = n.page_count ? `${n.page_count} pg` : '';
           const date = n.created_at ? new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
           const meta = [pages, date].filter(Boolean).join(' · ');
+          const noteId = String(n.id || '');
           return `
           <div style="display:flex;align-items:center;gap:10px;padding:10px 13px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px">
             <span style="flex-shrink:0">📄</span>
             <div style="flex:1;min-width:0">
-              <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500">${n.title}</div>
+              <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500">${safeTitle}</div>
               <div style="font-size:11px;color:var(--muted);margin-top:1px">${meta}</div>
             </div>
             <span style="font-size:10.5px;padding:2px 7px;border-radius:4px;background:${statusColor}15;color:${statusColor};font-weight:500">${statusLabel}</span>
-            ${n.status === 'ready' && n.s3_key ? `<button onclick="viewNote('${n.id}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:11.5px;font-family:inherit;font-weight:500;padding:2px 6px">View</button>` : ''}
-            <button onclick="deleteNote('${n.id}', this)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 2px;line-height:1;opacity:0.5" title="Delete">&times;</button>
+            ${n.status === 'ready' && n.s3_key ? `<button onclick="viewNote('${noteId}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:11.5px;font-family:inherit;font-weight:500;padding:2px 6px">View</button>` : ''}
+            <button onclick="deleteNote('${noteId}', this)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 2px;line-height:1;opacity:0.5" title="Delete">&times;</button>
           </div>`;
         }).join('');
       } catch (e) {
@@ -1270,14 +1503,19 @@
     async function deleteNote(id, btn) {
       btn.disabled = true;
       try {
-        await fetch(`${API}/api/notes/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        const res = await fetch(`${API}/api/notes/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) throw new Error(`Delete failed (${res.status})`);
         loadNotes();
-      } catch { btn.disabled = false; }
+      } catch (e) {
+        btn.disabled = false;
+        showAlert('uploadAlertBox', e.message || 'Delete failed');
+      }
     }
 
     async function viewNote(id) {
       try {
         const res = await fetch(`${API}/api/notes/${id}/view`, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) throw new Error(`View failed (${res.status})`);
         const data = await res.json();
         if (data.viewUrl) window.open(data.viewUrl, '_blank');
         else showAlert('uploadAlertBox', 'Could not generate view URL.');
@@ -1306,6 +1544,7 @@
       token = null; refreshToken = null; tokenExpiresAt = null; sessionId = null;
       if (refreshTimer) clearTimeout(refreshTimer);
       if (pollInterval) clearInterval(pollInterval);
+      if (notesPoll) clearInterval(notesPoll);
       try { localStorage.removeItem('hzn_token'); localStorage.removeItem('hzn_refreshToken'); localStorage.removeItem('hzn_expiresAt'); localStorage.removeItem('hzn_apiKey'); } catch {}
       ['stepD2L','stepPiazza','stepSuccess','vncStep'].forEach(id => document.getElementById(id).classList.add('hidden'));
       document.querySelector('.wrap').classList.remove('wide');
@@ -1340,11 +1579,15 @@
       document.getElementById('authBtn').disabled = false;
     }
 
-    tryAutoLogin();
+    const inRecovery = initRecoveryModeFromUrl();
+    if (!inRecovery) tryAutoLogin();
+    window.addEventListener('hashchange', () => { initRecoveryModeFromUrl(); });
 
     document.addEventListener('keydown', e => {
       if (e.key !== 'Enter') return;
-      if (!document.getElementById('stepAuth').classList.contains('hidden')) handleAuth();
+      if (document.getElementById('stepAuth').classList.contains('hidden')) return;
+      if (recoveryMode) submitPasswordReset();
+      else handleAuth();
     });
   </script>
 </body>

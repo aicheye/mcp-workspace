@@ -4,7 +4,8 @@ const { Pool } = pg;
 
 // Support multiple env var names for flexibility
 const supabaseUrl = process.env.SUPABASE_URL || process.env.DATABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+// Server-side backend must prefer service role to avoid RLS write failures.
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
 
 if (!supabaseUrl) {
   throw new Error('Missing database URL: SUPABASE_URL or DATABASE_URL required');

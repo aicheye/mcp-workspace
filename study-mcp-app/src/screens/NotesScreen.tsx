@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AntDesign } from '@expo/vector-icons';
 import { notesService } from '../services/notes';
 import { Note } from '../types';
@@ -24,9 +24,16 @@ export default function NotesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation();
+  const hasFocusedOnce = useRef(false);
+  const skipFirstEmptySearchDebounce = useRef(false);
 
-  const loadNotes = async () => {
+  const loadNotes = useCallback(async (opts?: { silent?: boolean }) => {
     try {
+      if (opts?.silent) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       const data = await notesService.getNotes();
       setNotes(data);
     } catch (error) {
@@ -35,18 +42,22 @@ export default function NotesScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    loadNotes();
   }, []);
 
+  // Tabs stay mounted: refetch whenever this screen is shown (e.g. after upload modal closes).
+  useFocusEffect(
+    useCallback(() => {
+      loadNotes({ silent: hasFocusedOnce.current });
+      hasFocusedOnce.current = true;
+    }, [loadNotes])
+  );
+
   const onRefresh = () => {
-    setRefreshing(true);
-    if (searchQuery) {
-      performSearch();
+    if (searchQuery.trim()) {
+      setRefreshing(true);
+      performSearch().finally(() => setRefreshing(false));
     } else {
-      loadNotes();
+      loadNotes({ silent: true });
     }
   };
 
@@ -75,14 +86,17 @@ export default function NotesScreen() {
         performSearch();
       } else {
         setSearchResults([]);
-        if (notes.length === 0) {
-          loadNotes();
+        // Skip the first debounced "" on mount (useFocusEffect already loads). After that, clearing search refetches.
+        if (skipFirstEmptySearchDebounce.current) {
+          loadNotes({ silent: true });
+        } else {
+          skipFirstEmptySearchDebounce.current = true;
         }
       }
-    }, 500); // Debounce search
+    }, 500);
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, loadNotes]);
 
   const renderNote = ({ item }: { item: Note }) => (
     <TouchableOpacity style={styles.noteCard}>
@@ -107,7 +121,7 @@ export default function NotesScreen() {
         )}
       </View>
       <Text style={styles.noteDate}>
-        {new Date(item.createdAt).toLocaleDateString()}
+        {new Date(item.createdAt || item.created_at || Date.now()).toLocaleDateString()}
       </Text>
     </TouchableOpacity>
   );
@@ -160,6 +174,7 @@ export default function NotesScreen() {
             onPress={() => {
               setSearchQuery('');
               setSearchResults([]);
+              loadNotes({ silent: true });
             }}
             style={styles.clearButton}
           >
@@ -176,10 +191,13 @@ export default function NotesScreen() {
           </View>
         ) : (
           <FlatList
+            style={styles.listFlex}
             data={searchResults}
             renderItem={renderSearchResult}
             keyExtractor={(item, index) => item.sectionId || `search-${index}`}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={
+              searchResults.length === 0 ? styles.listContentEmpty : styles.listContent
+            }
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
             ListEmptyComponent={
               <View style={styles.centerContainer}>
@@ -198,10 +216,11 @@ export default function NotesScreen() {
           </View>
         ) : (
           <FlatList
+            style={styles.listFlex}
             data={notes}
             renderItem={renderNote}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContent}
+            keyExtractor={(item, index) => item.id || `note-${index}`}
+            contentContainerStyle={notes.length === 0 ? styles.listContentEmpty : styles.listContent}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
             ListEmptyComponent={
               <View style={styles.centerContainer}>
@@ -256,8 +275,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  listFlex: {
+    flex: 1,
+  },
   listContent: {
     padding: 24,
+    paddingBottom: 32,
+  },
+  listContentEmpty: {
+    flexGrow: 1,
+    padding: 24,
+    justifyContent: 'center',
   },
   noteCard: {
     backgroundColor: '#ffffff',
