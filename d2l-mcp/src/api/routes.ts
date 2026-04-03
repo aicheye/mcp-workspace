@@ -3,10 +3,10 @@
  * Mount at /api. All routes use authMiddleware (req.userId).
  */
 
-import { Router, Request, Response } from "express";
+import express, { Router, Request, Response } from "express";
 import { supabase } from "../utils/supabase.js";
 import { ingestPdfBuffer, embedNoteSections, generateEmbedding, NotesTools } from "../study/src/notes.js";
-import { isS3Configured, presignUpload, getObjectBuffer, getBucket } from "./s3.js";
+import { isS3Configured, presignUpload, presignDownload, getObjectBuffer, getBucket, putObjectBuffer } from "./s3.js";
 import { SyncTools } from "../study/src/sync.js";
 import { PiazzaTools } from "../study/src/piazza.js";
 import { D2LClient } from "../client.js";
@@ -15,6 +15,81 @@ import { getPiazzaCookieHeader } from "../study/piazzaAuth.js";
 import { registerDeviceToken, sendPushToUser, checkAndNotifyUpdates } from "./push.js";
 
 const router = Router();
+const rawPdfUpload = express.raw({ type: "*/*", limit: "60mb" });
+
+import { randomBytes, createHash } from "node:crypto";
+
+/** POST /api/keys — generate API key for current user. Returns plaintext key once. */
+router.post("/keys", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const headers = { "apikey": sbKey, "Authorization": `Bearer ${sbKey}`, "Content-Type": "application/json" };
+
+    // Check if user already has a key
+    const existing = await fetch(`${sbUrl}/rest/v1/api_keys?user_id=eq.${userId}&select=id&limit=1`, { headers });
+    const rows = await existing.json();
+    if (Array.isArray(rows) && rows.length > 0) {
+      res.status(409).json({ error: "API key already exists. Delete it first to generate a new one." });
+      return;
+    }
+
+    // Generate key
+    const raw = randomBytes(32);
+    const plaintext = "hzn_" + raw.toString("hex");
+    const keyHash = createHash("sha256").update(plaintext).digest("hex");
+
+    const resp = await fetch(`${sbUrl}/rest/v1/api_keys`, {
+      method: "POST",
+      headers: { ...headers, "Prefer": "return=representation" },
+      // Only columns guaranteed on RDS/PostgREST api_keys (no optional label column)
+      body: JSON.stringify({ user_id: userId, key_hash: keyHash }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    res.json({ apiKey: plaintext });
+  } catch (e: any) {
+    console.error("[API] key create error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** GET /api/keys — check if user has an API key */
+router.get("/keys", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const resp = await fetch(`${sbUrl}/rest/v1/api_keys?user_id=eq.${userId}&select=id&limit=1`, {
+      headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const rows = await resp.json();
+    res.json({ hasKey: Array.isArray(rows) && rows.length > 0 });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** DELETE /api/keys — revoke user's API key */
+router.delete("/keys", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const resp = await fetch(`${sbUrl}/rest/v1/api_keys?user_id=eq.${userId}`, {
+      method: "DELETE",
+      headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 /** POST /api/notes/presign-upload — { filename, contentType, size, courseId? } -> { uploadUrl, s3Key } */
 router.post("/notes/presign-upload", async (req: Request, res: Response) => {
@@ -34,6 +109,39 @@ router.post("/notes/presign-upload", async (req: Request, res: Response) => {
   } catch (e) {
     console.error("[API] presign error:", e);
     res.status(500).json({ error: "Failed to generate presigned URL" });
+  }
+});
+
+/** POST /api/notes/upload-direct?s3Key=... — fallback upload relay for browsers with S3 CORS issues */
+router.post("/notes/upload-direct", rawPdfUpload, async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const s3Key = String(req.query.s3Key || "");
+  const contentType = String(req.headers["content-type"] || "application/pdf");
+
+  if (!s3Key) {
+    res.status(400).json({ error: "s3Key query param required" });
+    return;
+  }
+  const prefix = `users/${userId}/`;
+  if (!s3Key.startsWith(prefix)) {
+    res.status(403).json({ error: "s3Key must be under your user path" });
+    return;
+  }
+  if (!isS3Configured()) {
+    res.status(503).json({ error: "S3 not configured" });
+    return;
+  }
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    res.status(400).json({ error: "Binary PDF body required" });
+    return;
+  }
+
+  try {
+    await putObjectBuffer(s3Key, req.body, contentType || "application/pdf");
+    res.json({ ok: true, bytes: req.body.length });
+  } catch (e: any) {
+    console.error("[API] upload-direct error:", e);
+    res.status(500).json({ error: e?.message || "Failed to upload file" });
   }
 });
 
@@ -236,24 +344,47 @@ router.post("/notes/process", async (req: Request, res: Response) => {
 router.get("/notes", async (req: Request, res: Response) => {
   const userId = req.userId!;
   const courseId = req.query.courseId as string | undefined;
-
-  let query = supabase
-    .from("notes")
-    .select("id, title, course_id, created_at, page_count, status")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (courseId) query = query.eq("course_id", courseId);
-
-  const { data: notes, error } = await query;
-
-  if (error) {
-    console.error("[API] notes list error:", error);
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    let url = `${sbUrl}/rest/v1/notes?user_id=eq.${userId}&select=id,title,course_id,created_at,page_count,status,s3_key&order=created_at.desc`;
+    if (courseId) url += `&course_id=eq.${courseId}`;
+    const resp = await fetch(url, {
+      headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const notes = await resp.json();
+    res.json({ notes: notes ?? [] });
+  } catch (e: any) {
+    console.error("[API] notes list error:", e);
     res.status(500).json({ error: "Failed to list notes" });
-    return;
   }
+});
 
-  res.json({ notes: notes ?? [] });
+/** GET /api/notes/:id/view — get a presigned URL to view a note's PDF */
+router.get("/notes/:id/view", async (req: Request, res: Response) => {
+  const userId = req.userId!;
+  const noteId = req.params.id;
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const resp = await fetch(`${sbUrl}/rest/v1/notes?user_id=eq.${userId}&id=eq.${noteId}&select=s3_key&limit=1`, {
+      headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const rows = await resp.json();
+    const note = Array.isArray(rows) ? rows[0] : rows;
+    if (!note?.s3_key) {
+      res.status(404).json({ error: "Note not found" });
+      return;
+    }
+    const viewUrl = await presignDownload(note.s3_key);
+    res.json({ viewUrl });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /** DELETE /api/notes/:id — delete a note and its sections for the current user */
@@ -268,34 +399,34 @@ router.delete("/notes/:id", async (req: Request, res: Response) => {
 
   try {
     console.info("[API] Deleting note and sections:", { userId, noteId });
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const headers = { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` };
 
     // First delete note_sections for this note/user
-    const { error: sectionsError } = await supabase
-      .from("note_sections")
-      .delete()
-      .eq("user_id", userId)
-      .eq("note_id", noteId);
-
-    if (sectionsError) {
-      console.error("[API] notes delete - note_sections error:", sectionsError);
-      res.status(500).json({ error: "Failed to delete note sections", details: sectionsError.message });
+    const secResp = await fetch(`${sbUrl}/rest/v1/note_sections?user_id=eq.${userId}&note_id=eq.${noteId}`, {
+      method: "DELETE", headers,
+    });
+    if (!secResp.ok) {
+      const msg = await secResp.text();
+      console.error("[API] notes delete - note_sections error:", msg);
+      res.status(500).json({ error: "Failed to delete note sections", details: msg });
       return;
     }
 
     // Then delete the note itself
-    const { data: deletedNotes, error: notesError } = await supabase
-      .from("notes")
-      .delete()
-      .eq("user_id", userId)
-      .eq("id", noteId)
-      .select("id");
-
-    if (notesError) {
-      console.error("[API] notes delete - notes error:", notesError);
-      res.status(500).json({ error: "Failed to delete note", details: notesError.message });
+    const noteResp = await fetch(`${sbUrl}/rest/v1/notes?user_id=eq.${userId}&id=eq.${noteId}`, {
+      method: "DELETE", headers: { ...headers, "Prefer": "return=representation" },
+    });
+    if (!noteResp.ok) {
+      const msg = await noteResp.text();
+      console.error("[API] notes delete - notes error:", msg);
+      res.status(500).json({ error: "Failed to delete note", details: msg });
       return;
     }
 
+    const deletedNotes = await noteResp.json();
     if (!deletedNotes || deletedNotes.length === 0) {
       res.status(404).json({ error: "Note not found" });
       return;
@@ -373,7 +504,7 @@ router.get("/dashboard", async (req: Request, res: Response) => {
         .select("id, title, course_id, created_at, status")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(5),
+        .limit(12),
       supabase
         .from("note_sections")
         .select("id", { count: "exact", head: true })
@@ -1498,15 +1629,24 @@ router.post("/d2l/save-credentials", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const { error } = await supabase.from("user_credentials").upsert({
-      user_id: userId,
-      service: "d2l",
-      host: host || process.env.D2L_HOST || "learn.uwaterloo.ca",
-      username,
-      password,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id,service" });
-    if (error) throw error;
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (!sbUrl || !sbKey) throw new Error("Missing Supabase config");
+    const resp = await fetch(`${sbUrl}/rest/v1/user_credentials`, {
+      method: "POST",
+      headers: {
+        "apikey": sbKey, "Authorization": `Bearer ${sbKey}`,
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates",
+      },
+      body: JSON.stringify({
+        user_id: userId, service: "d2l",
+        host: host || process.env.D2L_HOST || "learn.uwaterloo.ca",
+        username, password,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

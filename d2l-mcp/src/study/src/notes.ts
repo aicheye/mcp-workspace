@@ -227,10 +227,9 @@ export async function ingestPdfBuffer(
 			}
 		}
 		
-		const { error, data } = await supabase.from("note_sections").upsert(batch, {
-			onConflict: "user_id,course_id,anchor",
-			ignoreDuplicates: false,
-		});
+		// For app uploads, each note_id/anchor set is new; use insert to avoid
+		// requiring a specific ON CONFLICT unique constraint in every deployment.
+		const { error } = await supabase.from("note_sections").insert(batch);
 		
 		if (error) {
 			console.error(`[INGEST] Supabase error:`, error);

@@ -477,6 +477,10 @@ async function main() {
     app.get("/onboard", (_req, res) => {
       const filePath = path.join(publicDir, "onboard.html");
       console.error(`[ONBOARD] Serving from: ${filePath}`);
+      // Always serve the latest onboarding page (avoid stale browser/CDN caches).
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
       res.sendFile(filePath, (err) => {
         if (err) {
           console.error(`[ONBOARD] sendFile error:`, err);

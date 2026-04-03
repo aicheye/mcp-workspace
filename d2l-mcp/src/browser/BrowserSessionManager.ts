@@ -24,6 +24,7 @@ import fs from "fs/promises";
 import os from "os";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { supabase } from "../utils/supabase.js";
+import { clearDuoRequired } from "../auth.js";
 
 const SESSIONS_BASE = process.env.SESSIONS_PATH || "/tmp/sessions";
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
@@ -299,6 +300,39 @@ export class BrowserSessionManager {
         return;
       }
 
+      // Validate cookies by making a test D2L API call before storing
+      try {
+        const testUrl = `https://${d2lHost}/d2l/api/lp/1.43/users/whoami`;
+        const testResp = await fetch(testUrl, {
+          headers: { "Cookie": `d2lSessionVal=${sessionVal}; d2lSecureSessionVal=${secureVal}` },
+          redirect: "manual",
+        });
+        if (testResp.status === 403 || testResp.status === 302) {
+          console.error(`[VNC] Captured cookies are stale (status ${testResp.status}) for user ${userId} — forcing fresh login`);
+          // Clear S3 state so next session forces real login
+          try {
+            const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
+            await s3.send(new DeleteObjectCommand({
+              Bucket: S3_BUCKET,
+              Key: `browser-state/${userId}/storage-state.json`,
+            }));
+            console.error(`[VNC] Deleted stale S3 browser state for user ${userId}`);
+          } catch (e: any) {
+            console.error(`[VNC] Failed to delete S3 state: ${e?.message}`);
+          }
+          session.status = "waiting";
+          // Navigate to login page to force fresh auth
+          try {
+            await session.page.goto(`https://${d2lHost}/d2l/login`, { timeout: 10000 });
+          } catch {}
+          BrowserSessionManager._watchForLogin(sessionId, userId, d2lHost, session.page, context);
+          return;
+        }
+        console.error(`[VNC] Cookie validation passed (status ${testResp.status}) for user ${userId}`);
+      } catch (valErr: any) {
+        console.error(`[VNC] Cookie validation error: ${valErr.message} — storing anyway`);
+      }
+
       // Save FULL storage state (all cookies incl. ADFS) to S3 for session resumption
       const tmpStatePath = path.join(os.tmpdir(), `storage-state-${sessionId}.json`);
       await context.storageState({ path: tmpStatePath });
@@ -306,22 +340,48 @@ export class BrowserSessionManager {
       await fs.unlink(tmpStatePath).catch(() => {});
 
       // Store D2L session token in Supabase for MCP tool use
+      // Use direct REST API — Supabase JS client has known issues in ECS
       const token = JSON.stringify({ d2lSessionVal: sessionVal, d2lSecureSessionVal: secureVal });
-      const { error } = await supabase.from("user_credentials").upsert({
-        user_id: userId,
-        service: "d2l",
-        host: d2lHost,
-        token,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "user_id,service" });
+      const sbUrl = process.env.SUPABASE_URL;
+      const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
 
-      if (error) {
-        console.error(`[VNC] Failed to store credentials in Supabase for user ${userId}:`, error.message);
+      if (sbUrl && sbKey) {
+        try {
+          // Upsert via REST API with Prefer: resolution=merge-duplicates
+          const restUrl = `${sbUrl}/rest/v1/user_credentials`;
+          const upsertResp = await fetch(restUrl, {
+            method: "POST",
+            headers: {
+              "apikey": sbKey,
+              "Authorization": `Bearer ${sbKey}`,
+              "Content-Type": "application/json",
+              "Prefer": "resolution=merge-duplicates",
+            },
+            body: JSON.stringify({
+              user_id: userId,
+              service: "d2l",
+              host: d2lHost,
+              token,
+              updated_at: new Date().toISOString(),
+            }),
+          });
+          if (!upsertResp.ok) {
+            const errText = await upsertResp.text();
+            console.error(`[VNC] Failed to store credentials via REST for user ${userId}: ${upsertResp.status} ${errText}`);
+          } else {
+            console.error(`[VNC] Successfully stored D2L credentials for user ${userId}`);
+          }
+        } catch (restErr: any) {
+          console.error(`[VNC] REST API error storing credentials for user ${userId}:`, restErr.message);
+        }
       } else {
-        console.error(`[VNC] Successfully stored D2L credentials for user ${userId}`);
+        console.error(`[VNC] Missing SUPABASE_URL or key — cannot store D2L credentials`);
       }
 
       session.status = "authenticated";
+
+      // Clear the duo_required flag since we just successfully re-authed
+      await clearDuoRequired(userId).catch(() => {});
 
       // Close after 3s so user can see the logged-in state
       setTimeout(() => BrowserSessionManager.closeSession(sessionId), 3000);

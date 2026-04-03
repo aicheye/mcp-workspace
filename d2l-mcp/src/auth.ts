@@ -4,8 +4,6 @@ import { homedir } from "os";
 import { join } from "path";
 import { existsSync } from "fs";
 import { supabase } from "./utils/supabase.js";
-import { refreshD2LSession } from "./jobs/sessionRefresher.js";
-import { sendPushToUser } from "./api/push.js";
 
 const REMOTE_DEBUG = process.env.REMOTE_DEBUG === "true";
 
@@ -17,7 +15,7 @@ function getSessionPath(userId?: string): string {
   return join(homedir(), ".d2l-session");
 }
 
-// Load D2L token for a user from database via direct REST API
+// Load D2L token for a user from database
 async function getD2LToken(userId?: string): Promise<{ host: string; token: string; updated_at?: string } | null> {
   if (!userId) return null;
   try {
@@ -47,21 +45,23 @@ async function getD2LToken(userId?: string): Promise<{ host: string; token: stri
 async function getD2LCredentials(userId?: string): Promise<{ host: string; username: string; password: string } | null> {
   if (userId) {
     try {
-      const { data, error } = await supabase
-        .from("user_credentials")
-        .select("host, username, password")
-        .eq("user_id", userId)
-        .eq("service", "d2l")
-        .limit(1);
-      
-      const cred = Array.isArray(data) ? data[0] : data;
-
-      if (!error && cred && cred.username && cred.password) {
-        return {
-          host: cred.host || process.env.D2L_HOST || "learn.ul.ie",
-          username: cred.username,
-          password: cred.password,
-        };
+      const sbUrl = process.env.SUPABASE_URL;
+      const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+      if (sbUrl && sbKey) {
+        const restUrl = `${sbUrl}/rest/v1/user_credentials?user_id=eq.${userId}&service=eq.d2l&select=host,username,password&limit=1`;
+        const resp = await fetch(restUrl, {
+          headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
+        });
+        if (resp.ok) {
+          const rows = await resp.json() as Array<{ host: string; username: string; password: string }>;
+          if (rows.length > 0 && rows[0].username && rows[0].password) {
+            return {
+              host: rows[0].host || process.env.D2L_HOST || "learn.uwaterloo.ca",
+              username: rows[0].username,
+              password: rows[0].password,
+            };
+          }
+        }
       }
     } catch (e) {
       console.error("[AUTH] Error loading D2L credentials from DB:", e);
@@ -85,6 +85,8 @@ interface TokenCache {
   expiresAt: number;
 }
 
+let tokenCache: TokenCache = { token: "", expiresAt: 0 };
+
 function isLoginPage(url: string): boolean {
   return (
     url.includes("login") ||
@@ -98,8 +100,45 @@ function isLoginPage(url: string): boolean {
 const userTokenCache: Record<string, TokenCache> = {};
 
 /**
- * Check if a user's D2L session requires Duo re-authentication.
- * Returns true if duo_required_at is set (session refresh failed).
+ * Mark that a user needs Duo re-authentication.
+ * This is checked by the daily health job and MCP tool responses.
+ */
+async function markDuoRequired(userId: string): Promise<void> {
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (sbUrl && sbKey) {
+      await fetch(`${sbUrl}/rest/v1/user_credentials?user_id=eq.${userId}&service=eq.d2l`, {
+        method: "PATCH",
+        headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ duo_required_at: new Date().toISOString() }),
+      });
+    }
+    console.error(`[AUTH] Marked Duo required for user ${userId}`);
+  } catch (e) {
+    console.error(`[AUTH] Failed to mark Duo required for user ${userId}:`, e);
+  }
+}
+
+/**
+ * Clear Duo required flag after successful re-authentication.
+ */
+export async function clearDuoRequired(userId: string): Promise<void> {
+  try {
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (sbUrl && sbKey) {
+      await fetch(`${sbUrl}/rest/v1/user_credentials?user_id=eq.${userId}&service=eq.d2l`, {
+        method: "PATCH",
+        headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ duo_required_at: null, notification_sent_at: null }),
+      });
+    }
+  } catch {}
+}
+
+/**
+ * Check if a user needs Duo re-authentication.
  */
 export async function isDuoRequired(userId: string): Promise<boolean> {
   try {
@@ -112,7 +151,112 @@ export async function isDuoRequired(userId: string): Promise<boolean> {
     if (!resp.ok) return false;
     const rows = await resp.json() as Array<{ duo_required_at: string | null }>;
     return rows.length > 0 && !!rows[0].duo_required_at;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Attempt a silent headless re-login using stored credentials + S3 browser state.
+ * Returns the new token on success, null if Duo wall is hit.
+ */
+async function attemptSilentRelogin(userId: string): Promise<string | null> {
+  const creds = await getD2LCredentials(userId);
+  if (!creds?.username || !creds?.password) {
+    console.error(`[AUTH] No stored credentials for user ${userId}, cannot silent re-login`);
+    return null;
+  }
+
+  console.error(`[AUTH] Attempting silent re-login for user ${userId}`);
+
+  const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || "/usr/bin/chromium";
+  const sessionPath = getSessionPath(userId);
+
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(sessionPath, {
+      headless: true,
+      executablePath: chromiumPath,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    });
+  } catch (e: any) {
+    console.error(`[AUTH] Silent re-login browser launch failed: ${e.message}`);
+    return null;
+  }
+
+  try {
+    const page = await context.newPage();
+
+    // Navigate and wait for final destination — UW SSO redirects through ADFS
+    // even with valid session cookies, so don't bail on intermediate URLs
+    await page.goto(`https://${creds.host}/d2l/home`, { timeout: 30000, waitUntil: 'networkidle' }).catch(() => {});
+
+    const finalUrl = page.url();
+    console.error(`[AUTH] Silent re-login final URL for user ${userId}: ${finalUrl}`);
+
+    // If we landed on a Duo MFA page — cannot proceed headlessly
+    if (finalUrl.includes("duo") || finalUrl.includes("duosecurity")) {
+      console.error(`[AUTH] Silent re-login hit Duo wall for user ${userId}`);
+      return null;
+    }
+
+    // If we're on a username/password form — try filling it
+    if (finalUrl.includes("adfs") || finalUrl.includes("login") || finalUrl.includes("saml")) {
+      console.error(`[AUTH] Silent re-login on auth page, attempting credential fill for user ${userId}`);
+      await page.fill('input[type="text"], input[name="UserName"], input[name="username"]', creds.username).catch(() => {});
+      await page.fill('input[type="password"], input[name="Password"], input[name="password"]', creds.password).catch(() => {});
+      await page.keyboard.press("Enter");
+      // Wait for redirect — if Duo comes up we can't proceed
+      await page.waitForURL('**', { timeout: 15000 }).catch(() => {});
+      const postLoginUrl = page.url();
+      console.error(`[AUTH] Post-credential URL for user ${userId}: ${postLoginUrl}`);
+      if (postLoginUrl.includes("duo") || postLoginUrl.includes("adfs") || postLoginUrl.includes("login")) {
+        console.error(`[AUTH] Still on auth/Duo page after credential fill for user ${userId}`);
+        return null;
+      }
+    }
+
+    // Extract D2L session cookies
+    const cookies = await context.cookies();
+    const sessionVal = cookies.find(c => c.name === "d2lSessionVal")?.value;
+    const secureVal = cookies.find(c => c.name === "d2lSecureSessionVal")?.value;
+
+    if (!sessionVal || !secureVal) {
+      console.error(`[AUTH] Silent re-login: no D2L cookies found for user ${userId}`);
+      return null;
+    }
+
+    const token = JSON.stringify({ d2lSessionVal: sessionVal, d2lSecureSessionVal: secureVal });
+
+    // Persist new token via REST API
+    const sbUrl = process.env.SUPABASE_URL;
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    if (sbUrl && sbKey) {
+      await fetch(`${sbUrl}/rest/v1/user_credentials`, {
+        method: "POST",
+        headers: {
+          "apikey": sbKey, "Authorization": `Bearer ${sbKey}`,
+          "Content-Type": "application/json",
+          "Prefer": "resolution=merge-duplicates",
+        },
+        body: JSON.stringify({
+          user_id: userId, service: "d2l", host: creds.host, token,
+          duo_required_at: null, notification_sent_at: null,
+          updated_at: new Date().toISOString(),
+        }),
+      });
+    }
+
+    userTokenCache[userId] = { token, expiresAt: Date.now() + 82800000 };
+    console.error(`[AUTH] Silent re-login succeeded for user ${userId}`);
+    return token;
+
+  } catch (e: any) {
+    console.error(`[AUTH] Silent re-login error for user ${userId}: ${e.message}`);
+    return null;
+  } finally {
+    try { await context.close(); } catch {}
+  }
 }
 
 export async function getToken(userId?: string): Promise<string> {
@@ -126,78 +270,36 @@ export async function getToken(userId?: string): Promise<string> {
     if (userToken && userToken.token) {
       // Check if token is already aged (older than 20 hours)
       const tokenAge = Date.now() - (new Date(userToken.updated_at || 0).getTime());
-      const maxAge = 20 * 60 * 60 * 1000; // 20 hours
+      const maxAge = 23 * 60 * 60 * 1000; // 23 hours
       
       if (tokenAge > maxAge) {
-        console.error(`[AUTH] Stored token for user ${userId} is too old (${Math.round(tokenAge / 3600000)}h), attempting auto-refresh`);
-        if (isProduction) {
-          // Attempt headless refresh before giving up
-          const refreshResult = await refreshD2LSession(userId);
-          if (refreshResult.success) {
-            // Re-read the freshly stored token
-            const freshToken = await getD2LToken(userId);
-            if (freshToken?.token) {
-              console.error(`[AUTH] Auto-refresh succeeded for user ${userId}`);
-              userTokenCache[cacheKey] = {
-                token: freshToken.token,
-                expiresAt: Date.now() + 82800000,
-              };
-              return freshToken.token;
-            }
-          }
-          // Refresh failed — notify user and throw
-          console.error(`[AUTH] Auto-refresh failed for user ${userId}: ${refreshResult.reason}`);
-          sendPushToUser(userId, "D2L Session Expired", "Please re-authenticate to continue using Horizon.", { type: "reauth_required" }).catch(() => {});
-          throw new Error("REAUTH_REQUIRED");
-        }
-        // Non-production: don't use cached token, continue to refresh
+        console.error(`[AUTH] Stored token for user ${userId} is too old (${Math.round(tokenAge / 3600000)}h), attempting silent re-login`);
+        // Try headless re-login with stored credentials before giving up
+        const refreshed = await attemptSilentRelogin(userId);
+        if (refreshed) return refreshed;
+        // If silent re-login fails (Duo wall), mark duo_required and throw
+        await markDuoRequired(userId);
+        throw new Error("REAUTH_REQUIRED");
       } else {
         console.error(`[AUTH] Using stored token for user ${userId} (age: ${Math.round(tokenAge / 3600000)}h)`);
+        // Clear duo_required flag if it was set — token is valid now
+        clearDuoRequired(userId).catch(() => {});
         userTokenCache[cacheKey] = {
           token: userToken.token,
-          expiresAt: Date.now() + 82800000, // 23 hours (tokens typically last 23h)
+          expiresAt: Date.now() + 82800000,
         };
         return userToken.token;
       }
     }
 
-    // In production, if no valid token exists, attempt auto-refresh before failing
-    if (isProduction) {
-      console.error(`[AUTH] Production mode: No valid token for user ${userId}, attempting auto-refresh`);
-      const refreshResult = await refreshD2LSession(userId);
-      if (refreshResult.success) {
-        const freshToken = await getD2LToken(userId);
-        if (freshToken?.token) {
-          console.error(`[AUTH] Auto-refresh succeeded for user ${userId}`);
-          userTokenCache[cacheKey] = {
-            token: freshToken.token,
-            expiresAt: Date.now() + 82800000,
-          };
-          return freshToken.token;
-        }
-      }
-      console.error(`[AUTH] Auto-refresh failed for user ${userId}: ${refreshResult.reason}`);
-      sendPushToUser(userId, "D2L Session Expired", "Please re-authenticate to continue using Horizon.", { type: "reauth_required" }).catch(() => {});
-      throw new Error("REAUTH_REQUIRED");
-    }
+    // No token at all — try silent re-login with stored credentials
+    console.error(`[AUTH] No token for user ${userId}, attempting silent re-login`);
+    const refreshed = await attemptSilentRelogin(userId);
+    if (refreshed) return refreshed;
 
-    // Fall back to credentials if no token (non-production only)
-    const userCreds = await getD2LCredentials(userId);
-    if (userCreds && userCreds.username && userCreds.password) {
-      console.error(`[AUTH] Using user-specific credentials for user ${userId}`);
-      // Continue to authentication flow below
-    } else {
-      // User has no credentials, check env token as fallback
-      const envToken = process.env.D2L_TOKEN;
-      if (envToken) {
-        console.error(`[AUTH] No user credentials found, using D2L_TOKEN from environment variable`);
-        userTokenCache[cacheKey] = {
-          token: envToken,
-          expiresAt: Date.now() + 82800000, // 23 hours
-        };
-        return envToken;
-      }
-    }
+    // Silent re-login failed — Duo required
+    await markDuoRequired(userId);
+    throw new Error("REAUTH_REQUIRED");
   } else {
     // No userId - use env token if available (legacy behavior)
     const envToken = process.env.D2L_TOKEN;
@@ -298,7 +400,7 @@ export async function getToken(userId?: string): Promise<string> {
   
   // Try to use Alpine's chromium if available, otherwise use Playwright's
   const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || 
-                       (isProduction ? '/usr/bin/chromium-browser' : undefined);
+                       (isProduction ? '/usr/bin/chromium' : undefined);
   
   let context;
   try {
@@ -396,7 +498,7 @@ async function captureToken(
         // Check if it's a cookie string (contains d2lSessionVal or d2lSecureSessionVal)
         if (storedToken.token.includes('d2lSessionVal') || storedToken.token.includes('d2lSecureSessionVal')) {
           const tokenAge = Date.now() - (new Date(storedToken.updated_at || 0).getTime());
-          const maxAge = 20 * 60 * 60 * 1000; // 20 hours
+          const maxAge = 23 * 60 * 60 * 1000; // 23 hours
           
           if (tokenAge < maxAge) {
             console.error(`[AUTH] Using stored cookies from database (age: ${Math.round(tokenAge / 3600000)}h)`);

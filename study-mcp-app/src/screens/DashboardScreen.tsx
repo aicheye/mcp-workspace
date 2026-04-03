@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,14 +8,15 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AntDesign } from '@expo/vector-icons';
 import { dashboardService } from '../services/dashboard';
 import { d2lService } from '../services/d2l';
-import { DashboardResponse, Note } from '../types';
+import { DashboardResponse } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme';
 
@@ -28,15 +29,19 @@ interface UpcomingAssignment {
 }
 
 
+const windowH = Dimensions.get('window').height;
+
 export default function DashboardScreen() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [upcoming, setUpcoming] = useState<UpcomingAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
+  const hasFocusedOnce = useRef(false);
 
-  const loadUpcoming = async () => {
+  const loadUpcoming = useCallback(async () => {
     try {
       const courses = await d2lService.getCourses();
       const now = new Date();
@@ -72,10 +77,15 @@ export default function DashboardScreen() {
     } catch {
       // Upcoming is non-critical, fail silently
     }
-  };
+  }, []);
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async (opts?: { silent?: boolean }) => {
     try {
+      if (opts?.silent) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       const data = await dashboardService.getDashboard();
       setDashboard(data);
       loadUpcoming(); // non-blocking
@@ -110,15 +120,17 @@ export default function DashboardScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [loadUpcoming]);
 
-  useEffect(() => {
-    loadDashboard();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard({ silent: hasFocusedOnce.current });
+      hasFocusedOnce.current = true;
+    }, [loadDashboard])
+  );
 
   const onRefresh = () => {
-    setRefreshing(true);
-    loadDashboard();
+    loadDashboard({ silent: true });
   };
 
   if (loading) {
@@ -130,11 +142,16 @@ export default function DashboardScreen() {
     );
   }
 
+  const bottomPad = 24 + Math.max(insets.bottom, 12) + 56;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.contentContainer}
+        contentContainerStyle={[
+          styles.contentContainer,
+          { paddingBottom: bottomPad, minHeight: windowH - 40 },
+        ]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
       >
         {/* Header with gradient effect */}
@@ -181,6 +198,70 @@ export default function DashboardScreen() {
             <Text style={styles.statValue}>{dashboard?.usage?.totalChunks || 0}</Text>
             <Text style={styles.statLabel}>Chunks</Text>
           </View>
+        </View>
+
+        {/* Recent notes first — full-width, primary */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Your PDFs & notes</Text>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Notes' as never)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.viewAllLink}>View all</Text>
+            </TouchableOpacity>
+          </View>
+          {dashboard?.recentNotes && dashboard.recentNotes.length > 0 ? (
+            dashboard.recentNotes.map((note, index) => (
+              <TouchableOpacity
+                key={note.id || `recent-${index}`}
+                style={styles.noteCard}
+                activeOpacity={0.7}
+              >
+                <View style={styles.noteCardHeader}>
+                  <View style={styles.noteIcon}>
+                    <AntDesign name="pdffile1" size={22} color={colors.accent} />
+                  </View>
+                  <View style={styles.noteContent}>
+                    <Text style={styles.noteTitle} numberOfLines={2}>{note.title}</Text>
+                    {(note.courseId || note.course_id) && (
+                      <View style={styles.courseBadge}>
+                        <Text style={styles.courseText}>{note.courseId || note.course_id}</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <View style={styles.noteFooter}>
+                  <Text style={styles.noteDate}>
+                    {new Date(note.createdAt || note.created_at || '').toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </Text>
+                  {note.status && (
+                    <View style={[styles.statusBadge, note.status === 'ready' && styles.statusReady]}>
+                      <Text style={styles.statusText}>{note.status}</Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <View style={styles.notesEmptyPanel}>
+              <AntDesign name="pdffile1" size={40} color={colors.muted} />
+              <Text style={styles.notesEmptyTitle}>No PDFs yet</Text>
+              <Text style={styles.notesEmptySub}>Open the Notes tab and tap Upload to add a file.</Text>
+              <TouchableOpacity
+                style={styles.notesEmptyCta}
+                onPress={() => navigation.navigate('Notes' as never)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.notesEmptyCtaText}>Go to Notes</Text>
+                <AntDesign name="right" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* My Courses Card */}
@@ -233,50 +314,6 @@ export default function DashboardScreen() {
             </View>
           )}
         </View>
-
-        {/* Recent Notes Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Notes</Text>
-          {dashboard?.recentNotes && dashboard.recentNotes.length > 0 ? (
-            dashboard.recentNotes.map((note) => (
-              <TouchableOpacity key={note.id} style={styles.noteCard} activeOpacity={0.7}>
-                <View style={styles.noteCardHeader}>
-                  <View style={styles.noteIcon}>
-                    <AntDesign name="filetext1" size={20} color={colors.accent} />
-                  </View>
-                  <View style={styles.noteContent}>
-                    <Text style={styles.noteTitle} numberOfLines={1}>{note.title}</Text>
-                    {(note.courseId || note.course_id) && (
-                      <View style={styles.courseBadge}>
-                        <Text style={styles.courseText}>{note.courseId || note.course_id}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-                <View style={styles.noteFooter}>
-                  <Text style={styles.noteDate}>
-                    {new Date(note.createdAt || note.created_at || '').toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric'
-                    })}
-                  </Text>
-                  {note.status && (
-                    <View style={[styles.statusBadge, note.status === 'ready' && styles.statusReady]}>
-                      <Text style={styles.statusText}>{note.status}</Text>
-                    </View>
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <View style={styles.emptyState}>
-              <AntDesign name="mail" size={48} color={colors.muted} />
-              <Text style={styles.emptyText}>No notes yet</Text>
-              <Text style={styles.emptySubtext}>Upload your first note to get started</Text>
-            </View>
-          )}
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -291,7 +328,56 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    paddingBottom: 20,
+    flexGrow: 1,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  viewAllLink: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.accent,
+  },
+  notesEmptyPanel: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    padding: 28,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+  },
+  notesEmptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  notesEmptySub: {
+    fontSize: 14,
+    color: colors.info,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  notesEmptyCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.accent,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+  },
+  notesEmptyCtaText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
   loadingContainer: {
     flex: 1,
