@@ -38,6 +38,7 @@ func main() {
 	// ── Global middleware ────────────────────────────────────────────────────
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.RealIP)
+	r.Use(middleware.CORS)              // CORS headers + OPTIONS preflight (must run before Auth)
 	r.Use(middleware.Metrics)           // Prometheus instrumentation (all routes)
 	r.Use(middleware.Auth(jwksURL))     // JWT verification (skips public routes internally)
 	r.Use(middleware.RateLimit(limiter)) // Per-user rate limiting
