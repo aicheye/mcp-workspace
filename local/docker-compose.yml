@@ -1,0 +1,60 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: horizon
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      # Mount existing schema files directly — no copy needed
+      - ../d2l-mcp/src/study/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ../d2l-mcp/src/study/db/migrations/002_add_user_credentials.sql:/docker-entrypoint-initdb.d/02_credentials.sql:ro
+      - ../d2l-mcp/src/study/db/migrations/003_add_token_column.sql:/docker-entrypoint-initdb.d/03_token.sql:ro
+      - ../d2l-mcp/src/study/db/migrations/004_add_duo_reauth.sql:/docker-entrypoint-initdb.d/04_duo.sql:ro
+      - ../d2l-mcp/src/study/db/migrations/005_api_keys.sql:/docker-entrypoint-initdb.d/05_api_keys.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d horizon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mcp:
+    build:
+      context: ../d2l-mcp
+      dockerfile: Dockerfile
+      target: local
+    ports:
+      - "${MCP_PORT:-4100}:${MCP_PORT:-4100}"
+    environment:
+      # Database (local postgres — no Supabase needed)
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD}@db:5432/horizon
+      # Single-user local mode — no JWT auth
+      SKIP_JWT_AUTH: "1"
+      MCP_USER_ID: local-user
+      # Bearer token for MCP endpoint access
+      STUDY_MCP_TOKEN: ${MCP_TOKEN}
+      # Credentials (from .env, fall back used by src/auth.ts and src/study/piazzaAuth.ts)
+      D2L_HOST: ${D2L_HOST}
+      D2L_USERNAME: ${D2L_USERNAME}
+      D2L_PASSWORD: ${D2L_PASSWORD}
+      PIAZZA_USERNAME: ${PIAZZA_USERNAME:-}
+      PIAZZA_PASSWORD: ${PIAZZA_PASSWORD:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Local notes watcher (polls /notes for new PDFs/DOCX every 5s)
+      LOCAL_NOTES_DIR: /notes
+      # Server config
+      MCP_TRANSPORT: http
+      MCP_PORT: ${MCP_PORT:-4100}
+      API_HOST: ${API_HOST:-localhost:4100}
+      NODE_ENV: production
+    volumes:
+      - browser_sessions:/root  # Persists D2L browser cookies between restarts
+      - ./notes:/notes:rw       # Drop PDFs/DOCX here to ingest them
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:
+  browser_sessions:

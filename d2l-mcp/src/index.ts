@@ -32,6 +32,7 @@ import apiRoutes from "./api/routes.js";
 import d2lAuthRoutes from "./api/d2lAuthRoutes.js";
 import publicAuthRoutes from "./api/publicAuthRoutes.js";
 import { BrowserSessionManager } from "./browser/BrowserSessionManager.js";
+import { startLocalNotesWatcher } from "./localNotes.js";
 import { fileURLToPath } from "url";
 
 function createServer(): McpServer {
@@ -893,6 +894,9 @@ async function main() {
         console.error("[HEALTH] Daily check error:", e);
       }
     };
+
+    // Local notes watcher — polls LOCAL_NOTES_DIR for new PDFs/DOCX files
+    startLocalNotesWatcher(process.env.MCP_USER_ID || "local-user");
 
     // Run once at startup (after 5min delay), then every 24h
     setTimeout(() => {
