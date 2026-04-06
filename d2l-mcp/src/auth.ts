@@ -3,7 +3,10 @@ import { chromium, BrowserContext } from "playwright";
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync } from "fs";
+import fs from "fs/promises";
+import os from "os";
 import { supabase } from "./utils/supabase.js";
+import { saveStorageStateToS3 } from "./utils/s3Storage.js";
 
 const REMOTE_DEBUG = process.env.REMOTE_DEBUG === "true";
 
@@ -42,7 +45,7 @@ async function getD2LToken(userId?: string): Promise<{ host: string; token: stri
 }
 
 // Load D2L credentials for a user from database, or fall back to env vars
-async function getD2LCredentials(userId?: string): Promise<{ host: string; username: string; password: string } | null> {
+export async function getD2LCredentials(userId?: string): Promise<{ host: string; username: string; password: string } | null> {
   if (userId) {
     try {
       const sbUrl = process.env.SUPABASE_URL;
@@ -227,6 +230,17 @@ async function attemptSilentRelogin(userId: string): Promise<string | null> {
     }
 
     const token = JSON.stringify({ d2lSessionVal: sessionVal, d2lSecureSessionVal: secureVal });
+
+    // Save refreshed browser storage state to S3 so future scheduled refreshes can use ADFS cookies
+    try {
+      const tmpStatePath = join(os.tmpdir(), `silent-relogin-state-${userId}.json`);
+      await context.storageState({ path: tmpStatePath });
+      await saveStorageStateToS3(userId, tmpStatePath);
+      await fs.unlink(tmpStatePath).catch(() => {});
+      console.error(`[AUTH] Saved browser storage state to S3 for user ${userId}`);
+    } catch (s3Err: any) {
+      console.error(`[AUTH] Failed to save browser state to S3 for user ${userId}: ${s3Err?.message}`);
+    }
 
     // Persist new token via REST API
     const sbUrl = process.env.SUPABASE_URL;

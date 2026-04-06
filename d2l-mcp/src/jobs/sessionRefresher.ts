@@ -17,6 +17,7 @@ import fs from "fs/promises";
 import { supabase } from "../utils/supabase.js";
 import { loadStorageStateFromS3, saveStorageStateToS3 } from "../utils/s3Storage.js";
 import { sendPushToUser } from "../api/push.js";
+import { getD2LCredentials } from "../auth.js";
 
 const CHROMIUM_PATH = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || "/usr/bin/chromium";
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000; // check every 30 min
@@ -30,21 +31,188 @@ export interface RefreshResult {
 }
 
 /**
+ * Attempt a headless credential-based D2L login for a user.
+ * Used as a fallback when ADFS browser state is absent or expired.
+ * On success: upserts token to DB, saves new browser state to S3, clears duo_required_at.
+ * Returns { token, storageStatePath } on success, null if Duo wall hit or no creds stored.
+ */
+async function attemptCredentialLogin(
+  userId: string,
+  d2lHost: string
+): Promise<{ token: string; storageStatePath: string } | null> {
+  const creds = await getD2LCredentials(userId);
+  if (!creds?.username || !creds?.password) {
+    console.error(`[REFRESH] No stored credentials for user ${userId} — cannot attempt credential login`);
+    return null;
+  }
+
+  console.error(`[REFRESH] Attempting credential-based login for user ${userId}`);
+
+  let browser;
+  try {
+    browser = await chromium.launch({
+      executablePath: CHROMIUM_PATH,
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    await page.goto(`https://${d2lHost}/d2l/home`, {
+      waitUntil: "domcontentloaded",
+      timeout: NAV_TIMEOUT_MS,
+    });
+    await page.waitForTimeout(3000);
+
+    const landingUrl = page.url();
+    console.error(`[REFRESH] Credential login landing URL for user ${userId}: ${landingUrl}`);
+
+    // If Duo wall — cannot proceed headlessly
+    if (landingUrl.includes("duo") || landingUrl.includes("duosecurity")) {
+      console.error(`[REFRESH] Credential login hit Duo wall for user ${userId}`);
+      await browser.close();
+      return null;
+    }
+
+    // If on a username/password form — fill credentials
+    if (
+      landingUrl.includes("adfs") ||
+      landingUrl.includes("login") ||
+      landingUrl.includes("saml") ||
+      landingUrl.includes("microsoftonline") ||
+      landingUrl.includes("sso")
+    ) {
+      console.error(`[REFRESH] Filling credentials for user ${userId}`);
+      await page.fill('input[type="text"], input[name="UserName"], input[name="username"]', creds.username).catch(() => {});
+
+      // Look for a Next/Submit button (multi-step ADFS forms)
+      const nextSelectors = [
+        'input[type="submit"]',
+        'button[type="submit"]',
+        '#submitButton',
+        'input[value*="Next" i]',
+        'button:has-text("Next")',
+      ];
+      let clicked = false;
+      for (const sel of nextSelectors) {
+        try {
+          const btn = page.locator(sel).first();
+          if (await btn.isVisible({ timeout: 1000 })) {
+            await btn.click();
+            clicked = true;
+            await page.waitForTimeout(2000);
+            break;
+          }
+        } catch { continue; }
+      }
+      if (!clicked) {
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(2000);
+      }
+
+      await page.fill('input[type="password"], input[name="Password"], input[name="password"]', creds.password).catch(() => {});
+
+      const submitSelectors = [
+        'input[type="submit"]',
+        'button[type="submit"]',
+        'button:has-text("Sign in")',
+        'button:has-text("Log in")',
+        '#submitButton',
+      ];
+      let submitted = false;
+      for (const sel of submitSelectors) {
+        try {
+          const btn = page.locator(sel).first();
+          if (await btn.isVisible({ timeout: 1000 })) {
+            await btn.click();
+            submitted = true;
+            break;
+          }
+        } catch { continue; }
+      }
+      if (!submitted) {
+        await page.keyboard.press("Enter");
+      }
+
+      await page.waitForTimeout(5000);
+
+      const postLoginUrl = page.url();
+      console.error(`[REFRESH] Post-credential URL for user ${userId}: ${postLoginUrl}`);
+
+      if (
+        postLoginUrl.includes("duo") ||
+        postLoginUrl.includes("duosecurity") ||
+        postLoginUrl.includes("adfs") ||
+        postLoginUrl.includes("login") ||
+        postLoginUrl.includes("microsoftonline")
+      ) {
+        console.error(`[REFRESH] Still on auth/Duo page after credential fill for user ${userId}`);
+        await browser.close();
+        return null;
+      }
+    }
+
+    // Extract D2L session cookies
+    const cookies = await context.cookies();
+    const sessionVal = cookies.find(c => c.name === "d2lSessionVal" && c.domain.includes(d2lHost))?.value;
+    const secureVal = cookies.find(c => c.name === "d2lSecureSessionVal" && c.domain.includes(d2lHost))?.value;
+
+    if (!sessionVal || !secureVal) {
+      console.error(`[REFRESH] Credential login: no D2L cookies found for user ${userId}`);
+      await browser.close();
+      return null;
+    }
+
+    // Save browser storage state to S3
+    const tmpStatePath = path.join(os.tmpdir(), `cred-login-state-${userId}.json`);
+    await context.storageState({ path: tmpStatePath });
+    await saveStorageStateToS3(userId, tmpStatePath);
+    await fs.unlink(tmpStatePath).catch(() => {});
+
+    const token = JSON.stringify({ d2lSessionVal: sessionVal, d2lSecureSessionVal: secureVal });
+
+    // Upsert fresh token and clear duo_required_at
+    const { error } = await supabase.from("user_credentials").upsert({
+      user_id: userId,
+      service: "d2l",
+      host: d2lHost,
+      token,
+      duo_required_at: null,
+      notification_sent_at: null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id,service" });
+
+    if (error) {
+      console.error(`[REFRESH] Failed to store credential-login token for user ${userId}:`, error.message);
+    }
+
+    await browser.close();
+    console.error(`[REFRESH] Credential login succeeded for user ${userId}`);
+    return { token, storageStatePath: tmpStatePath };
+
+  } catch (err: any) {
+    console.error(`[REFRESH] Credential login error for user ${userId}:`, err?.message);
+    if (browser) await browser.close().catch(() => {});
+    return null;
+  }
+}
+
+/**
  * Attempt to refresh a user's D2L session cookies using saved ADFS browser state.
+ * Falls back to credential-based login if ADFS state is absent or expired.
  * No VNC, no Xvfb — fully headless.
  */
 export async function refreshD2LSession(userId: string): Promise<RefreshResult> {
   const startTime = Date.now();
   console.error(`[REFRESH] Starting headless refresh for user ${userId}`);
 
-  // 1. Load saved browser state from S3
-  const storageStatePath = await loadStorageStateFromS3(userId);
-  if (!storageStatePath) {
-    console.error(`[REFRESH] No stored browser state for user ${userId} — cannot auto-refresh`);
-    return { success: false, reason: "no_stored_state" };
-  }
-
-  // 2. Get the user's D2L host via direct REST API
+  // 1. Get the user's D2L host via direct REST API (needed for both S3 and credential paths)
   let d2lHost = process.env.D2L_HOST || "learn.uwaterloo.ca";
   try {
     const sbUrl = process.env.SUPABASE_URL;
@@ -60,6 +228,19 @@ export async function refreshD2LSession(userId: string): Promise<RefreshResult> 
     }
   } catch (e) {
     console.error("[REFRESH] Error fetching D2L host:", e);
+  }
+
+  // 2. Load saved browser state from S3
+  const storageStatePath = await loadStorageStateFromS3(userId);
+  if (!storageStatePath) {
+    console.error(`[REFRESH] No stored browser state for user ${userId} — trying credential login`);
+    const credResult = await attemptCredentialLogin(userId, d2lHost);
+    if (credResult) {
+      console.error(`[REFRESH] Credential login succeeded for user ${userId} (no prior S3 state)`);
+      return { success: true };
+    }
+    console.error(`[REFRESH] Credential login failed for user ${userId} — marking duo_required`);
+    return { success: false, reason: "no_stored_state" };
   }
 
   let browser;
@@ -102,8 +283,15 @@ export async function refreshD2LSession(userId: string): Promise<RefreshResult> 
       finalUrl.includes("adfs");
 
     if (isLoginPage) {
-      console.error(`[REFRESH] ADFS session expired for user ${userId} — Duo required`);
+      console.error(`[REFRESH] ADFS session expired for user ${userId} — trying credential login`);
       await browser.close();
+      browser = undefined;
+      const credResult = await attemptCredentialLogin(userId, d2lHost);
+      if (credResult) {
+        console.error(`[REFRESH] Credential login succeeded for user ${userId} (ADFS state expired)`);
+        return { success: true };
+      }
+      console.error(`[REFRESH] Credential login failed for user ${userId} — marking duo_required`);
       return { success: false, reason: "duo_required" };
     }
 
@@ -185,7 +373,7 @@ export function startSessionRefreshScheduler(): void {
       for (const user of staleUsers) {
         const result = await refreshD2LSession(user.user_id);
 
-        if (!result.success && result.reason === "duo_required") {
+        if (!result.success && (result.reason === "duo_required" || result.reason === "no_stored_state")) {
           sendPushToUser(
             user.user_id,
             "D2L Session Expired",
