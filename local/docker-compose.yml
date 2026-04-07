@@ -34,6 +34,7 @@ services:
       MCP_USER_ID: local-user
       # Bearer token for MCP endpoint access
       STUDY_MCP_TOKEN: ${MCP_TOKEN}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
       # Credentials (from .env, fall back used by src/auth.ts and src/study/piazzaAuth.ts)
       D2L_HOST: ${D2L_HOST}
       D2L_USERNAME: ${D2L_USERNAME}

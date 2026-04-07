@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import "dotenv/config";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import express from "express";
@@ -489,6 +489,66 @@ async function main() {
         }
       });
     });
+
+    // OAuth 2.0 for Claude web (only when OAUTH_CLIENT_ID is set)
+    if (process.env.OAUTH_CLIENT_ID) {
+      const pendingCodes = new Map<string, { clientId: string; redirectUri: string; codeChallenge: string }>();
+
+      app.get("/.well-known/oauth-authorization-server", (_req, res) => {
+        const host = process.env.API_HOST || `localhost:${port}`;
+        const proto = host.startsWith("localhost") ? "http" : "https";
+        const base = `${proto}://${host}`;
+        res.json({
+          issuer: base,
+          authorization_endpoint: `${base}/authorize`,
+          token_endpoint: `${base}/token`,
+          response_types_supported: ["code"],
+          grant_types_supported: ["authorization_code"],
+          code_challenge_methods_supported: ["S256"],
+          token_endpoint_auth_methods_supported: ["client_secret_post"],
+        });
+      });
+
+      app.get("/authorize", (req, res) => {
+        const { client_id, redirect_uri, code_challenge, state } = req.query as Record<string, string>;
+        if (client_id !== process.env.OAUTH_CLIENT_ID) {
+          res.status(400).json({ error: "invalid_client" });
+          return;
+        }
+        const code = randomBytes(24).toString("hex");
+        pendingCodes.set(code, { clientId: client_id, redirectUri: redirect_uri, codeChallenge: code_challenge || "" });
+        setTimeout(() => pendingCodes.delete(code), 5 * 60 * 1000);
+        const location = new URL(redirect_uri);
+        location.searchParams.set("code", code);
+        if (state) location.searchParams.set("state", state);
+        res.redirect(location.toString());
+      });
+
+      app.post("/token", (req, res) => {
+        const { grant_type, code, redirect_uri, client_id, client_secret, code_verifier } = req.body;
+        const entry = pendingCodes.get(code);
+        if (
+          grant_type !== "authorization_code" ||
+          client_id !== process.env.OAUTH_CLIENT_ID ||
+          client_secret !== process.env.STUDY_MCP_TOKEN ||
+          !entry ||
+          entry.clientId !== client_id ||
+          entry.redirectUri !== redirect_uri
+        ) {
+          res.status(400).json({ error: "invalid_grant" });
+          return;
+        }
+        if (entry.codeChallenge) {
+          const digest = createHash("sha256").update(code_verifier || "").digest("base64url");
+          if (digest !== entry.codeChallenge) {
+            res.status(400).json({ error: "invalid_grant" });
+            return;
+          }
+        }
+        pendingCodes.delete(code);
+        res.json({ access_token: process.env.STUDY_MCP_TOKEN, token_type: "Bearer", expires_in: 31536000 });
+      });
+    }
 
     // Public auth routes (signup/signin for onboarding — no JWT required)
     app.use("/auth", publicAuthRoutes);
