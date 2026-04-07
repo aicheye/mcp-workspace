@@ -606,7 +606,8 @@ async function main() {
       }
 
       // Extract userId from X-User-Id header (injected by Go gateway after JWT verification)
-      const requestUserId = (req.headers["x-user-id"] as string) || "legacy";
+      // In local mode (no gateway), fall back to MCP_USER_ID env var
+      const requestUserId = (req.headers["x-user-id"] as string) || process.env.MCP_USER_ID || "legacy";
 
       return runWithUserId(requestUserId, async () => {
       const requestStartTime = Date.now();

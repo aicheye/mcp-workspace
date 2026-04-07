@@ -375,9 +375,8 @@ export class BrowserSessionManager {
           console.error(`[VNC] REST API error storing credentials for user ${userId}:`, restErr.message);
         }
       } else {
-        // Local mode: persist token to local file (in browser_sessions volume)
-        const localDir = process.env.SESSIONS_PATH || os.homedir();
-        const localTokenFile = path.join(localDir, `d2l-token-${userId}.json`);
+        // Local mode: persist token to local file (in browser_sessions volume at /root)
+        const localTokenFile = path.join(os.homedir(), `d2l-token-${userId}.json`);
         try {
           await fs.writeFile(localTokenFile, JSON.stringify({
             host: d2lHost, token, updated_at: new Date().toISOString(),

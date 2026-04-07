@@ -20,8 +20,7 @@ function getSessionPath(userId?: string): string {
 
 // Load D2L token for a user from database
 function localTokenPath(userId: string): string {
-  const dir = process.env.SESSIONS_PATH || os.homedir();
-  return join(dir, `d2l-token-${userId}.json`);
+  return join(os.homedir(), `d2l-token-${userId}.json`);
 }
 
 async function getD2LToken(userId?: string): Promise<{ host: string; token: string; updated_at?: string } | null> {
@@ -109,7 +108,9 @@ function isLoginPage(url: string): boolean {
     url.includes("login") ||
     url.includes("microsoftonline") ||
     url.includes("sso") ||
-    url.includes("adfs")
+    url.includes("adfs") ||
+    url.includes("duo") ||
+    url.includes("duosecurity")
   );
 }
 

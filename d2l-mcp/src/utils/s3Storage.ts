@@ -13,8 +13,8 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3
 const S3_BUCKET = process.env.S3_BUCKET;
 const S3_REGION = process.env.AWS_REGION || "us-east-1";
 
-// Local filesystem fallback path (used when S3 not configured — local Docker mode)
-const LOCAL_STATE_DIR = process.env.SESSIONS_PATH || os.homedir();
+// Local filesystem fallback path — always use homedir (/root), which is the mounted volume
+const LOCAL_STATE_DIR = os.homedir();
 
 function localStatePath(userId: string): string {
   return path.join(LOCAL_STATE_DIR, `browser-state-${userId}.json`);
