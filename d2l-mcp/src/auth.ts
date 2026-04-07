@@ -311,9 +311,14 @@ export async function getToken(userId?: string): Promise<string> {
     const refreshed = await attemptSilentRelogin(userId);
     if (refreshed) return refreshed;
 
-    // Silent re-login failed — Duo required
-    await markDuoRequired(userId);
-    throw new Error("REAUTH_REQUIRED");
+    // Silent re-login failed
+    if (process.env.SUPABASE_URL) {
+      // Cloud mode: mark Duo required and throw
+      await markDuoRequired(userId);
+      throw new Error("REAUTH_REQUIRED");
+    }
+    // Local mode (no Supabase): fall through to the regular captureToken browser login path
+    console.error(`[AUTH] Silent re-login failed in local mode, falling through to full browser login`);
   } else {
     // No userId - use env token if available (legacy behavior)
     const envToken = process.env.D2L_TOKEN;

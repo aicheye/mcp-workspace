@@ -160,6 +160,39 @@ export async function getPiazzaAuthenticatedContext(userId?: string): Promise<Br
     // In production, we cannot handle manual login - throw error
     // Use the isProduction variable already declared above (line 96)
     if (isProduction) {
+      // In local mode with env credentials, attempt headless login via piazza.com/account/login
+      const creds = await getPiazzaCredentials(userId);
+      if (creds) {
+        console.error("[PIAZZA_AUTH] Attempting headless login with env credentials");
+        try {
+          const loginUrl = "https://piazza.com/account/login";
+          if (!page.url().includes("/account/login")) {
+            await page.goto(loginUrl, { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+          }
+          // Fill email and password — Piazza's direct login form
+          await page.fill('input[name="email"]', creds.email).catch(() =>
+            page.fill('input[type="email"]', creds.email)
+          );
+          await page.fill('input[name="password"]', creds.password).catch(() =>
+            page.fill('input[type="password"]', creds.password)
+          );
+          await page.locator('button[type="submit"], input[type="submit"]').first().click();
+          await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+          const loggedInAfter = await isLoggedIn(page);
+          if (loggedInAfter) {
+            console.error("[PIAZZA_AUTH] Headless login succeeded");
+            await page.close();
+            return context;
+          }
+        } catch (e: any) {
+          console.error("[PIAZZA_AUTH] Headless login attempt failed:", e.message);
+        }
+        await context.close();
+        throw new Error(
+          "Piazza login failed. Check PIAZZA_USERNAME/PIAZZA_PASSWORD in your .env. " +
+          "If your school uses SSO for Piazza, you need to log in once via VNC (expose port 6080 in docker-compose.yml)."
+        );
+      }
       await context.close();
       throw new Error("Piazza session expired and manual login required, but running in production/AWS where browser login is not possible. Please re-authenticate via mobile app.");
     }
@@ -263,8 +296,10 @@ export async function getPiazzaCookieHeader(userId?: string): Promise<string> {
     }
   }
   
-  // Fallback to browser-based auth (ONLY in non-production)
-  if (isProduction) {
+  // Fallback to browser-based auth (ONLY in non-production OR local mode with env credentials)
+  // Local mode sets NODE_ENV=production but has no Supabase and uses env credentials directly.
+  const isLocalMode = !process.env.SUPABASE_URL && !!process.env.PIAZZA_USERNAME;
+  if (isProduction && !isLocalMode) {
     throw new Error("Piazza authentication required but no valid cookies found. Please re-authenticate via mobile app WebView login.");
   }
   
