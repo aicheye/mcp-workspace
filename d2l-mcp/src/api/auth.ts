@@ -135,7 +135,7 @@ export async function authMiddleware(
 ): Promise<void> {
   if (SKIP) {
     const uid = req.headers["x-user-id"] as string | undefined;
-    req.userId = uid?.trim() || "dev-user";
+    req.userId = uid?.trim() || process.env.MCP_USER_ID || "dev-user";
     next();
     return;
   }

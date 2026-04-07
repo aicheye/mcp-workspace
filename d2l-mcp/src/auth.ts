@@ -6,7 +6,7 @@ import { existsSync } from "fs";
 import fs from "fs/promises";
 import os from "os";
 import { supabase } from "./utils/supabase.js";
-import { saveStorageStateToS3 } from "./utils/s3Storage.js";
+import { saveStorageStateToS3, loadStorageStateFromS3 } from "./utils/s3Storage.js";
 
 const REMOTE_DEBUG = process.env.REMOTE_DEBUG === "true";
 
@@ -19,12 +19,26 @@ function getSessionPath(userId?: string): string {
 }
 
 // Load D2L token for a user from database
+function localTokenPath(userId: string): string {
+  const dir = process.env.SESSIONS_PATH || os.homedir();
+  return join(dir, `d2l-token-${userId}.json`);
+}
+
 async function getD2LToken(userId?: string): Promise<{ host: string; token: string; updated_at?: string } | null> {
   if (!userId) return null;
   try {
     const sbUrl = process.env.SUPABASE_URL;
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
-    if (!sbUrl || !sbKey) return null;
+    if (!sbUrl || !sbKey) {
+      // Local mode: read from local file (persisted in browser_sessions volume)
+      try {
+        const data = JSON.parse(await fs.readFile(localTokenPath(userId), "utf-8"));
+        if (data?.token) return data;
+      } catch {
+        // No local token yet
+      }
+      return null;
+    }
     const restUrl = `${sbUrl}/rest/v1/user_credentials?user_id=eq.${userId}&service=eq.d2l&select=host,token,updated_at&limit=1`;
     const resp = await fetch(restUrl, {
       headers: { "apikey": sbKey, "Authorization": `Bearer ${sbKey}` },
@@ -188,6 +202,20 @@ async function attemptSilentRelogin(userId: string): Promise<string | null> {
   }
 
   try {
+    // Inject saved ADFS cookies (from S3 or local file) so Duo is skipped
+    const savedStatePath = await loadStorageStateFromS3(userId);
+    if (savedStatePath) {
+      try {
+        const stateJson = JSON.parse(await fs.readFile(savedStatePath, "utf-8"));
+        if (stateJson.cookies?.length) {
+          await context.addCookies(stateJson.cookies);
+          console.error(`[AUTH] Injected ${stateJson.cookies.length} saved ADFS cookies for user ${userId}`);
+        }
+      } catch (e: any) {
+        console.error(`[AUTH] Failed to inject saved cookies: ${e.message}`);
+      }
+    }
+
     const page = await context.newPage();
 
     // Navigate and wait for final destination — UW SSO redirects through ADFS
@@ -242,7 +270,7 @@ async function attemptSilentRelogin(userId: string): Promise<string | null> {
       console.error(`[AUTH] Failed to save browser state to S3 for user ${userId}: ${s3Err?.message}`);
     }
 
-    // Persist new token via REST API
+    // Persist new token
     const sbUrl = process.env.SUPABASE_URL;
     const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
     if (sbUrl && sbKey) {
@@ -259,6 +287,11 @@ async function attemptSilentRelogin(userId: string): Promise<string | null> {
           updated_at: new Date().toISOString(),
         }),
       });
+    } else {
+      // Local mode: persist token to local file
+      await fs.writeFile(localTokenPath(userId), JSON.stringify({
+        host: creds.host, token, updated_at: new Date().toISOString(),
+      })).catch((e: any) => console.error(`[AUTH] Failed to save local token: ${e.message}`));
     }
 
     userTokenCache[userId] = { token, expiresAt: Date.now() + 82800000 };

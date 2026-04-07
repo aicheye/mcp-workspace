@@ -220,7 +220,7 @@ export class BrowserSessionManager {
 
     const session: BrowserSession = {
       sessionId, userId, d2lHost,
-      vncUrl: `https://${apiHost || process.env.API_HOST || "localhost"}/vnc/${sessionId}/vnc.html?autoconnect=true&reconnect=true&path=vnc/${sessionId}/websockify`,
+      vncUrl: `http${process.env.HTTPS === "1" ? "s" : ""}://${apiHost || process.env.API_HOST || "localhost"}/vnc/${sessionId}/vnc.html?autoconnect=true&reconnect=true&path=vnc/${sessionId}/websockify`,
       wsPort, vncPort, displayNum,
       browser, context, page,
       xvfbProc, x11vncProc, websockifyProc,
@@ -375,7 +375,17 @@ export class BrowserSessionManager {
           console.error(`[VNC] REST API error storing credentials for user ${userId}:`, restErr.message);
         }
       } else {
-        console.error(`[VNC] Missing SUPABASE_URL or key — cannot store D2L credentials`);
+        // Local mode: persist token to local file (in browser_sessions volume)
+        const localDir = process.env.SESSIONS_PATH || os.homedir();
+        const localTokenFile = path.join(localDir, `d2l-token-${userId}.json`);
+        try {
+          await fs.writeFile(localTokenFile, JSON.stringify({
+            host: d2lHost, token, updated_at: new Date().toISOString(),
+          }));
+          console.error(`[VNC] Saved D2L token locally for user ${userId}`);
+        } catch (e: any) {
+          console.error(`[VNC] Failed to save local token for user ${userId}: ${e.message}`);
+        }
       }
 
       session.status = "authenticated";
